@@ -1,10 +1,12 @@
 import { zipSync, strToU8 } from "fflate";
-import { exportSTEP } from "replicad";
+import { exportSTEP, importSTEP } from "replicad";
 import wasmUrl from "replicad-opencascadejs/wasm?url";
 import { initKernel, buildToolStart } from "./toolStart.js";
+// import { buildPrimitive } from "./primitives.js";
 
 const ready = initKernel({ locateFile: () => wasmUrl });
 let last = null;
+let imp = null;
 
 function threeMF(v, tr) {
   const verts = []; for (let i = 0; i < v.length; i += 3) verts.push(`<vertex x="${v[i]}" y="${v[i+1]}" z="${v[i+2]}"/>`);
@@ -19,6 +21,18 @@ function threeMF(v, tr) {
 
 onmessage = async (e) => {
   const m = e.data;
+  if (m.type === "import" || m.type === "primitive") {
+    try {
+      await ready;
+      if (imp?.delete) imp.delete();
+      const { buildPrimitive } = m.type === "primitive" ? await import("./primitives.js") : {};
+      imp = m.type === "import" ? await importSTEP(new Blob([m.data])) : buildPrimitive(m.kind, m.size);
+      const me = imp.mesh({ tolerance: 0.05, angularTolerance: 0.2 });
+      postMessage({ imported: true, ok: true, name: m.name, kind: m.kind, keep: m.keep,
+        mesh: { v: Float32Array.from(me.vertices), n: Float32Array.from(me.normals), t: Uint32Array.from(me.triangles) } });
+    } catch (err) { imp = null; postMessage({ imported: true, ok: false, error: String(err) }); }
+    return;
+  }
   try {
     await ready;
     if (m.type === "build") {

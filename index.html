@@ -9,10 +9,10 @@ body{--bg:#1e1f22;--fg:#e6e6e6;--line:#3a3b3f;--chip:#2b2c30;background:var(--bg
 .ok{color:#1a7f37}.warn{color:#b35900}.bad{color:#c62828}select{width:100%}
 #msg{margin-top:10px;font-size:12px}#msg div{margin:3px 0}button{margin:3px 3px 0 0;padding:6px 10px;background:var(--chip);color:var(--fg);border:1px solid var(--line);border-radius:4px}select,input{background:var(--chip);color:var(--fg);border:1px solid var(--line)}dialog{background:var(--bg);color:var(--fg)}
 #status{position:absolute;top:8px;left:8px;background:var(--chip);padding:4px 8px;border-radius:4px}
-.off{opacity:.35;pointer-events:none}dialog{max-width:360px}dialog label{display:block;margin:6px 0}dialog input,dialog select{width:100%;box-sizing:border-box}
+#steps span[data-s]{cursor:pointer}.off{opacity:.35;pointer-events:none}dialog{max-width:360px}dialog label{display:block;margin:6px 0}dialog input,dialog select{width:100%;box-sizing:border-box}
 </style></head><body>
-<div id="side"><div id="top"></div><div id="steps"><span class="on">1 Tool start</span><span>2 Tool end</span><span>3 Generate</span><span>4 Export</span></div>
+<div id="side"><div id="top"></div><div id="steps"><span class="on" data-s="A">1 Tool start</span><span data-s="B">2 Tool end</span><span>3 Generate</span><span>4 Export</span></div>
 <div id="controls"></div><div id="msg"></div>
-<div><b>Export tool start</b><br><button data-f="step">STEP</button><button data-f="stl">STL</button><button data-f="3mf">3MF</button></div></div>
+<div id="exportA"><b>Export tool start</b><br><button data-f="step">STEP</button><button data-f="stl">STL</button><button data-f="3mf">3MF</button></div></div>
 <div id="view"><div id="status">Loading geometry engine…</div></div>
 <script type="module" src="/src/main.js"></script></body></html>
