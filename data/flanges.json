@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "units": "mm",
+  "flanges": [
+    {
+      "id": "kuka-kr4-r600",
+      "brand": "KUKA",
+      "model": "KR 4 R600",
+      "source": "KUKA KR 4 R600 datasheet, mounting flange drawing; centre hole confirmed by the user on the physical flange",
+      "geometry": {
+        "pitchCircleDiameter": 31.5,
+        "positionCount": 8,
+        "angularPitchDeg": 45,
+        "threadedHoles": {
+          "count": 7,
+          "thread": "M5",
+          "threadDepth": 5,
+          "anglesDeg": [
+            45,
+            90,
+            135,
+            180,
+            225,
+            270,
+            315
+          ]
+        },
+        "locatingPin": {
+          "diameter": 5,
+          "fit": "H7",
+          "depth": 5,
+          "angleDeg": 0
+        },
+        "raisedSpigot": {
+          "diameter": 40,
+          "fit": "h7",
+          "height": 5.5
+        },
+        "centreHole": {
+          "diameter": 20,
+          "fit": "H7",
+          "depth": 6
+        }
+      }
+    },
+    {
+      "id": "kuka-kr180-r2500",
+      "brand": "KUKA",
+      "model": "KR 180 R2500",
+      "status": "needs data"
+    },
+    {
+      "id": "ur3e",
+      "brand": "Universal Robots",
+      "model": "UR3e",
+      "status": "needs data"
+    }
+  ]
+}
