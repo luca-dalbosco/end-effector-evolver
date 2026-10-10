@@ -1,0 +1,269 @@
+{
+  "schemaVersion": 6,
+  "units": "mm",
+  "name": "Tool start",
+  "description": "Adapter plate that bolts to the robot flange and carries the connection to the tool end. Flange geometry comes from flanges.json; everything here is a user setting or a rule derived from it.",
+  "screws": {
+    "count": "all threaded holes of the selected flange (no count option)",
+    "size": "taken from the flange thread (M5 for the KR 4 R600)"
+  },
+  "fitMode": {
+    "default": "plate",
+    "options": [
+      {
+        "id": "plate",
+        "label": "Plate",
+        "includes": [
+          "plate",
+          "screw holes",
+          "dowel"
+        ],
+        "note": "Best for printing from the base without supports. The dowel keeps the rotation aligned, but there is no centering spigot, so concentric alignment is weaker."
+      },
+      {
+        "id": "plate-spigot",
+        "label": "Plate + Spigot",
+        "includes": [
+          "plate",
+          "screw holes",
+          "spigot",
+          "dowel"
+        ]
+      },
+      {
+        "id": "plate-spigot-collar",
+        "label": "Plate + Spigot + Collar",
+        "includes": [
+          "plate",
+          "screw holes",
+          "spigot",
+          "dowel",
+          "collar"
+        ]
+      }
+    ]
+  },
+  "thickness": {
+    "description": "General thickness (t) of everything the tool start makes: plate, spigot wall and collar wall.",
+    "min": 1,
+    "max": 10,
+    "step": 0.5,
+    "default": 3,
+    "recommendedRange": [
+      1.5,
+      4.5
+    ],
+    "notRecommended": "below 1.5 (the minimum of 1 is allowed but flagged)"
+  },
+  "tolerances": {
+    "description": "Each value is an offset applied to each side of a surface (a hole grows by 2x the value in diameter, a peg shrinks by 2x the value in diameter).",
+    "screwHole": {
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.2,
+      "recommendedRange": [
+        0.15,
+        0.3
+      ],
+      "notRecommendedRange": [
+        0,
+        0.05
+      ]
+    },
+    "spigot": {
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.3,
+      "recommendedRange": [
+        0.2,
+        0.5
+      ]
+    },
+    "collar": {
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.3,
+      "recommendedRange": [
+        0.2,
+        0.5
+      ]
+    },
+    "dowelHole": {
+      "min": 0,
+      "max": 0.2,
+      "step": 0.025,
+      "default": 0.05,
+      "recommendedRange": [
+        0,
+        0.1
+      ],
+      "note": "Press-fit hole for a metal dowel, so the range is small."
+    },
+    "dowelPin": {
+      "min": 0,
+      "max": 0.5,
+      "step": 0.05,
+      "default": 0.15,
+      "recommendedRange": [
+        0.1,
+        0.3
+      ],
+      "note": "Printed dowel only. Proposed values, not yet confirmed."
+    }
+  },
+  "dowel": {
+    "description": "Alignment feature that fixes the plate's rotation, matching the locating pin hole in the flange.",
+    "includedIn": [
+      "plate",
+      "plate-spigot",
+      "plate-spigot-collar"
+    ],
+    "mode": {
+      "default": "hole",
+      "options": [
+        {
+          "id": "hole",
+          "label": "Hole for a metal dowel pin",
+          "diameter": "flange pin diameter + 2 x dowel hole tolerance",
+          "throughPlate": true
+        },
+        {
+          "id": "printedPin",
+          "label": "Printed pin (not recommended)",
+          "diameter": "flange pin diameter - 2 x printed dowel tolerance",
+          "length": "min(shared depth, flange pin depth) - printed dowel tolerance",
+          "recommended": false,
+          "warning": "Not recommended: printed pins are weaker and less accurate than a metal dowel because of printing tolerance and strength limits.",
+          "notAllowedIn": [
+            "plate"
+          ]
+        }
+      ]
+    }
+  },
+  "geometryRules": {
+    "plate": {
+      "thickness": "t",
+      "outerDiameter": "max(flange spigot diameter or outer diameter, collar outer diameter, 2 x (pitch circle radius + head cylinder diameter / 2 + plate edge margin)). Always sized for the screw head. With away-facing chamfers the margin grows by 2 x chamfer size.",
+      "centreHole": "plate: flange centre hole diameter, left empty. plate-spigot and plate-spigot-collar: spigot bore."
+    },
+    "spigot": {
+      "outerDiameter": "flange centre hole diameter - 2 x spigot tolerance",
+      "boreDiameter": "spigot outer diameter - 2 x t",
+      "length": "shared depth",
+      "example": "KR 4 R600, t = 1.5, tolerance 0.3: outer 19.4, bore 16.4, length 5.2"
+    },
+    "collar": {
+      "innerDiameter": "flange spigot diameter + 2 x collar tolerance",
+      "outerDiameter": "inner diameter + 2 x t",
+      "height": "shared depth"
+    },
+    "screwHole": {
+      "diameter": "screw nominal diameter + 2 x screw hole tolerance"
+    },
+    "screwArrangement": "The head cylinder of each screw must not overlap its neighbours. On the KR 4 R600 the closest screw centres are 12.05 apart, so cylinders up to 10 never overlap.",
+    "featureDepth": "Shared depth for the spigot and the collar: min(flange centre hole depth, flange spigot height) minus the larger of the spigot and collar tolerances. KR 4 R600: min(6, 5.5) = 5.5, minus 0.3 at the defaults = 5.2. Taking the larger tolerance guarantees neither feature bottoms out. In Plate mode (no spigot) a printed pin uses min(flange spigot height, centre hole depth) - spigot tolerance, capped by the flange pin depth minus the spigot tolerance.",
+    "dowelHole": {
+      "diameter": "flange pin diameter + 2 x dowel hole tolerance",
+      "includedIn": "all fit modes"
+    }
+  },
+  "screwClearance": {
+    "description": "Negative cylinder cut for the screw head (assumes socket head cap screws, ISO 4762). Opens on the face away from the robot.",
+    "headDiameterByScrew": {
+      "M3": 5.5,
+      "M4": 7,
+      "M5": 8.5
+    },
+    "headHeightByScrew": {
+      "M3": 3,
+      "M4": 4,
+      "M5": 5
+    },
+    "headDiameterMargin": 0.25,
+    "diameter": {
+      "start": "head diameter + 0.25",
+      "min": "M (nominal screw diameter)",
+      "max": "2 x M",
+      "recommendedWindow": 0.5
+    },
+    "length": {
+      "description": "How deep the cylinder cuts into the plate from the face the screws are inserted from.",
+      "start": "min(head height, t - 1)",
+      "examples": "head height 5: t = 3 gives 2, t = 6 gives 5, t = 8 gives 5"
+    },
+    "headSeat": {
+      "default": "none",
+      "options": [
+        "none",
+        "countersink",
+        "counterbore"
+      ]
+    },
+    "rules": {
+      "minRemainingMaterial": 1,
+      "countersink": {
+        "angleDeg": 90,
+        "rule": "Disabled if less than 1 mm of material would remain under the countersink.",
+        "message": "Less than 1 mm of material would remain under the countersink. Increase the thickness."
+      },
+      "counterbore": {
+        "rule": "Never disabled. Yellow warning when the head would stand proud of the plate.",
+        "message": "{proud} mm of the socket head would stand proud due to your selected thickness.",
+        "proud": "max(0, head height - cylinder length)"
+      }
+    }
+  },
+  "chamfer": {
+    "description": "Optional 45 degree chamfers on convex edges of planar faces, to make printing easier and screws easier to start.",
+    "size": {
+      "min": 0.1,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.5,
+      "note": "Only editable in Advanced mode."
+    },
+    "robotFacing": {
+      "default": false,
+      "applies": "convex edges of faces that face the robot: plate bottom outer edge, spigot and collar end edges, screw and dowel hole edges on the robot side, printed pin tip"
+    },
+    "awayFacing": {
+      "default": false,
+      "applies": "convex edges of faces that face away from the robot: plate top outer edge, centre hole top edge, screw and dowel hole entry edges, counterbore rim and counterbore floor hole edge. Countersinks are not chamfered because the cone already is a lead-in."
+    },
+    "notChamfered": "inside corners (where walls meet the plate) so mating fits are not affected",
+    "minThickness": 1.5,
+    "warning": "Chamfers are disabled below 1.5 mm thickness because both sides of a wall would meet."
+  },
+  "plateEdgeMargin": {
+    "description": "Extra material beyond the screw head cylinder at the plate edge. The plate is always sized for an Allen screw head, with or without a seat.",
+    "min": 0.2,
+    "max": 3,
+    "step": 0.1,
+    "default": 0.5,
+    "recommendedRange": [
+      0.5,
+      1
+    ]
+  },
+  "spigotStyle": {
+    "default": "holed",
+    "options": [
+      {
+        "id": "holed",
+        "label": "Holed (bore = spigot - 2 x thickness)"
+      },
+      {
+        "id": "full",
+        "label": "Full (solid)"
+      }
+    ],
+    "usedIn": [
+      "plate-spigot",
+      "plate-spigot-collar"
+    ]
+  }
+}
