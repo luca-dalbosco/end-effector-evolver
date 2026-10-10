@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import flangeData from "../data/flanges.json";
 import ts from "../data/toolStart.json";
+import { initFooterLinks } from './footerLinks.js';
 
 const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
 const $ = (id) => document.getElementById(id);
@@ -124,3 +125,5 @@ worker.onmessage = (e) => {
 };
 document.querySelectorAll("button[data-f]").forEach((b) => (b.onclick = () => worker.postMessage({ type: "export", id: reqId, format: b.dataset.f })));
 refreshAll(); build();
+
+initFooterLinks(); 
