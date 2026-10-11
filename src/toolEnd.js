@@ -52,7 +52,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
     const m = e.data; if (!m.imported) return;
     $("status").textContent = "Ready";
     if (!m.ok) return say("bad", "✖ " + m.error);
-    setPart(m.mesh, m.keep); partKind = m.kind ?? null; say("ok", "✔ Loaded " + m.name);
+    m.mesh.fg = m.fg; setPart(m.mesh, m.keep); partKind = m.kind ?? null; say("ok", "✔ Loaded " + m.name);
   });
 
   // ---------- number rows (slider + typed value; typing may go beyond the slider range) ----------

@@ -119,10 +119,12 @@ function compute(m) {
     if (best < 1) throw new Error("The tool start and the picked faces touch or overlap. Move the tool end away from the tool start.");
     const thr = best * (1 + m.band), dom = new Uint8Array(N), uni = new Uint8Array(N);
     let count = 0, nA = 0, nB = 0;
+    const layer = nx * ny;
     for (let c = 0; c < N; c++) {
       if (srcA[c]) nA++; if (srcB[c]) nB++;
       uni[c] = srcA[c] | srcB[c];
-      if (uni[c] || Math.sqrt(fA[c]) + Math.sqrt(fB[c]) <= thr) { dom[c] = 1; count++; }
+      const above = org[2] + (Math.floor(c / layer) + 1) * h > m.zClip; // nothing below the tool start top plane
+      if (uni[c] || (above && Math.sqrt(fA[c]) + Math.sqrt(fB[c]) <= thr)) { dom[c] = 1; count++; }
     }
     if (count > m.budget * 1.1 && !retried) { retried = true; h *= Math.cbrt(count / m.budget) * 1.02; continue; }
     return {
