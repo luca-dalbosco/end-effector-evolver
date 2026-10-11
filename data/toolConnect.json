@@ -1,0 +1,14 @@
+{
+  "voxelSize": { "min": 0.5, "max": 2, "step": 0.1, "default": 1.5, "recommendedRange": [0.5, 2], "note": "Display and export voxel size. The analysis may use a coarser voxel to stay fast." },
+  "designSpace": { "min": 0.2, "max": 2, "step": 0.1, "default": 0.6, "recommendedRange": [0.3, 1], "note": "How far the connector may wander from the straight path, as a fraction of the gap between the surfaces." },
+  "analysisVoxelBudget": { "min": 2000, "max": 500000, "step": 1000, "default": 40000, "recommendedRange": [10000, 60000], "note": "Maximum voxels in the design space." },
+  "toolStartConnection": {
+    "default": "entire",
+    "options": [
+      { "id": "entire", "label": "Entire top surface" },
+      { "id": "partial", "label": "Partial (spigot area only)" }
+    ]
+  },
+  "estimate": { "cgIterationsPerStep": 30, "optimizationSteps": 80, "overheadFactor": 2.5, "greenBelowMinutes": 5, "yellowBelowMinutes": 15 },
+  "maxGridCells": 3000000
+}

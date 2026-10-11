@@ -9,16 +9,16 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
   let part = null, partKind = null, primKind = te.primitives[0].id, primSize = te.primitiveSize.default, timer = null;
 
   // ---------- panel (shown only in stage B) ----------
-  const stageA = ["controls", "msg", "exportA"].map($);
+  const stageA = ["top", "controls", "msg", "exportA"].map($);
   const panel = document.createElement("div"); panel.style.display = "none"; $("exportA").after(panel);
   const spans = document.querySelectorAll("#steps span[data-s]");
   spans.forEach((s) => (s.onclick = () => showStage(s.dataset.s)));
   function showStage(st) {
-    const b = st === "B";
-    stageA.forEach((el) => (el.style.display = b ? "none" : ""));
-    panel.style.display = b ? "" : "none";
-    gizmo.enabled = b; helper.visible = b && !!part;
+    stageA.forEach((el) => (el.style.display = st === "A" ? "" : "none"));
+    panel.style.display = st === "B" ? "" : "none";
+    gizmo.enabled = st === "B"; helper.visible = st === "B" && !!part;
     spans.forEach((s) => s.classList.toggle("on", s.dataset.s === st));
+    document.dispatchEvent(new CustomEvent("stage", { detail: st }));
   }
   const head = (t) => { const b = document.createElement("div"); b.textContent = t; b.style.cssText = "font-weight:700;margin:14px 0 4px"; panel.append(b); };
   const btn = (label, fn) => { const b = document.createElement("button"); b.textContent = label; b.onclick = fn; return b; };
@@ -39,7 +39,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
     removePart();
     const bg = new THREE.BufferGeometry();
     bg.setAttribute("position", new THREE.BufferAttribute(m.v, 3)); bg.setAttribute("normal", new THREE.BufferAttribute(m.n, 3)); bg.setIndex(new THREE.BufferAttribute(m.t, 1));
-    part = new THREE.Group(); part.add(new THREE.Mesh(bg, mat));
+    part = new THREE.Group(); part.userData.fg = m.fg; part.add(new THREE.Mesh(bg, mat));
     if (pos) { part.position.copy(pos); part.rotation.copy(rot); }
     scene.add(part); gizmo.attach(part); helper.visible = true; refresh();
   }
@@ -117,4 +117,5 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
   for (const a of ["x", "y", "z"]) numRow(`Position ${a.toUpperCase()} (mm)`, te.position, () => part?.position[a] ?? 0, (v) => (part.position[a] = v));
   for (const a of ["x", "y", "z"]) numRow(`Rotation ${a.toUpperCase()} (°)`, te.rotation, () => ((part?.rotation[a] ?? 0) * 180) / Math.PI, (v) => (part.rotation[a] = (v * Math.PI) / 180));
   refresh();
+  return { getPart: () => part };
 }
