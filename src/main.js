@@ -11,7 +11,7 @@ const ready = (f) => f.status !== "needs data";
 const cur = { flange: flanges.find(ready) };
 const tolCfg = ts.tolerances;
 const settings = { fitMode: ts.fitMode.default, thickness: ts.thickness.default, dowelMode: ts.dowel.mode.default, headSeat: ts.screwClearance.headSeat.default,
-  plateMargin: ts.plateEdgeMargin.default, spigotStyle: ts.spigotStyle.default, chamfer: { robotFacing: false, awayFacing: false, size: ts.chamfer.size.default },
+  plateMargin: ts.plateEdgeMargin.default, spigotStyle: ts.spigotStyle.default, wallKeys: ts.wallKeys.default, chamfer: { robotFacing: false, awayFacing: false, size: ts.chamfer.size.default },
   tolerances: Object.fromEntries(Object.entries(tolCfg).filter(([, v]) => typeof v === "object").map(([k, v]) => [k, v.default])) };
 let advanced = false, reqId = 0, timer = null;
 const refreshers = [];
@@ -53,6 +53,8 @@ function fixSettings() { if (settings.fitMode === "plate-spigot" && !g()?.centre
 const fitOk = (o) => o.id === "plate" || (!!g()?.centreHole && (o.id === "plate-spigot" || !!g()?.raisedSpigot));
 select("Fit mode", () => ts.fitMode.options, () => settings.fitMode, (v) => { settings.fitMode = v; fixSettings(); }, undefined, fitOk);
 select("Spigot", () => ts.spigotStyle.options, () => settings.spigotStyle, (v) => (settings.spigotStyle = v), () => settings.fitMode !== "plate");
+const hasPockets = () => settings.fitMode !== "plate" && !!(g()?.centreHole?.wallPockets || (settings.fitMode === "plate-spigot-collar" && g()?.raisedSpigot?.wallPockets));
+check("Wall keys (fit the flange pockets)", () => settings.wallKeys, (v) => (settings.wallKeys = v), () => !hasPockets());
 slider("Thickness (mm)", ts.thickness, () => settings.thickness, (v) => (settings.thickness = v));
 slider("Plate edge margin (mm)", ts.plateEdgeMargin, () => settings.plateMargin, (v) => (settings.plateMargin = v));
 select("Dowel", () => ts.dowel.mode.options, () => settings.dowelMode, (v) => (settings.dowelMode = v), () => !!g()?.locatingPin, (o) => !(o.id === "printedPin" && settings.fitMode === "plate"));
@@ -83,8 +85,8 @@ $("fs").onclick = () => {
   const pos = fn("positions"), pin = fn("pinD") != null, need = ["pcd", "threadDepth", "positions"].filter((k) => !(fn(k) > 0));
   if (!fv("name") || need.length || (!fn("spigotD") && !fn("outerD")) || (pin && !(fn("pinDepth") > 0)) || (fn("spigotD") && !(fn("spigotH") > 0)) || (fn("centreD") && !(fn("centreDepth") > 0)))
     return ($("fe").textContent = "Please fill name, pitch circle, thread depth, positions, the depths of the features you use, and either a spigot or an outer diameter.");
-  const step = 360 / pos, count = pos - (pin ? 1 : 0), angles = Array.from({ length: count }, (_, i) => +((pin ? i + 1 : i) * step).toFixed(4));
-  const geometry = { pitchCircleDiameter: fn("pcd"), threadedHoles: { count, thread: fv("thread"), threadDepth: fn("threadDepth"), anglesDeg: angles } };
+  const step = 360 / pos, count = pos - (pin ? 1 : 0);
+  const geometry = { pitchCircleDiameter: fn("pcd"), threadedHoles: { count, thread: fv("thread"), threadDepth: fn("threadDepth"), startAngleDeg: pin ? step : 0, spacingDeg: step } };
   if (pin) geometry.locatingPin = { diameter: fn("pinD"), depth: fn("pinDepth"), angleDeg: 0 };
   if (fn("spigotD")) geometry.raisedSpigot = { diameter: fn("spigotD"), height: fn("spigotH") };
   if (fn("centreD")) geometry.centreHole = { diameter: fn("centreD"), depth: fn("centreDepth") };
