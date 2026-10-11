@@ -25,6 +25,7 @@ const SCREW_HEADS = {
 const HEAD_MARGIN = 0.25;
 const MIN_REMAINING = 1;
 const EPS = 1e-9;
+const KEY_OVERLAP = 0.5; // how far a key sinks into the wall or plate so it fuses cleanly
 
 export const DEFAULT_SETTINGS = {
   fitMode: "plate", // plate | plate-spigot | plate-spigot-collar
@@ -32,6 +33,7 @@ export const DEFAULT_SETTINGS = {
   tolerances: { screwHole: 0.2, spigot: 0.3, collar: 0.3, dowelHole: 0.05, dowelPin: 0.15 },
   plateMargin: 0.5,
   spigotStyle: "holed",
+  wallKeys: true, // keys that fit the flange wall pockets
   dowelMode: "hole", // hole | printedPin
   headSeat: "none", // none | countersink | counterbore
   headDiameter: null, // null = head diameter + 0.25
@@ -42,6 +44,36 @@ export const CHAMFER_SIZE = 0.5;
 
 function cyl(diameter, z0, z1, x = 0, y = 0) {
   return makeCylinder(diameter / 2, z1 - z0, [x, y, z0], [0, 0, 1]);
+}
+
+// Screw hole angles: from the pattern (count, startAngleDeg, spacingDeg), or from an explicit anglesDeg list (older local flanges).
+export function holeAngles(h) {
+  if (Array.isArray(h.anglesDeg)) return h.anglesDeg;
+  return Array.from({ length: h.count }, (_, i) => +(h.startAngleDeg + i * h.spacingDeg).toFixed(4));
+}
+
+// Wall keys: one small cylinder per pocket in the flange wall, so the printed part locks into them.
+// kind "spigot": pockets are in the flange centre hole wall, keys stick OUT of the spigot wall (wallR = spigot outer radius).
+// kind "collar": pockets are in the flange raised spigot wall, keys stick IN from the collar wall (wallR = collar inner radius).
+function addWallKeys(body, pockets, kind, wallR, tol, depth, warnings) {
+  const keyD = pockets.diameter - 2 * tol;
+  const len = Math.min(depth, pockets.depth - tol);
+  const pr = pockets.pitchCircleDiameter / 2;
+  const reach = kind === "spigot" ? pr + keyD / 2 - wallR : wallR - (pr - keyD / 2);
+  if (keyD <= 0 || len <= 0 || reach <= EPS) {
+    warnings.push(`Wall keys for the ${kind} were skipped: the pockets do not reach the printed wall or are too small for the tolerance.`);
+    return { body, n: 0 };
+  }
+  const dir = pockets.direction === "counterclockwise" ? 1 : -1; // seen from the tool side (+Z)
+  const trimR = kind === "spigot" ? wallR - KEY_OVERLAP : wallR + KEY_OVERLAP;
+  for (let i = 0; i < pockets.count; i++) {
+    const a = (dir * (pockets.startAngleDeg + i * pockets.spacingDeg) * Math.PI) / 180;
+    let key = cyl(keyD, -len, KEY_OVERLAP, pr * Math.cos(a), pr * Math.sin(a));
+    const ring = cyl(2 * trimR, -len - 1, 1);
+    key = kind === "spigot" ? key.cut(ring) : key.intersect(ring);
+    body = body.fuse(key);
+  }
+  return { body, n: pockets.count };
 }
 
 // Revolve a closed (r, z) profile around the Z axis.
@@ -133,7 +165,7 @@ export function buildToolStart(flange, userSettings = {}) {
   plateOuter = Math.max(plateOuter, 2 * (pcdR + headD / 2 + margin));
 
   // Screw arrangement check (closest pair of screw centres)
-  const angles = g.threadedHoles.anglesDeg;
+  const angles = holeAngles(g.threadedHoles);
   let minGap = Infinity;
   for (let i = 0; i < angles.length; i++)
     for (let j = i + 1; j < angles.length; j++) {
@@ -181,6 +213,19 @@ export function buildToolStart(flange, userSettings = {}) {
   if (errors.length) return { ok: false, errors, warnings };
   let body = revolveProfile(pts);
   const profile = pts;
+
+  // Wall keys (before the screw holes, so any overlap gets cut away)
+  let keyCount = 0;
+  if (s.wallKeys && hasSpigot) {
+    const jobs = [];
+    if (g.centreHole?.wallPockets) jobs.push([g.centreHole.wallPockets, "spigot", rs, tol.spigot]);
+    if (hasCollar && g.raisedSpigot?.wallPockets) jobs.push([g.raisedSpigot.wallPockets, "collar", rci, tol.collar]);
+    for (const [pk, kind, wallR, tl] of jobs) {
+      const r = addWallKeys(body, pk, kind, wallR, tl, depth, warnings);
+      body = r.body;
+      keyCount += r.n;
+    }
+  }
 
   // Cutters for chamfered hole edges
   const coneAway = (r, zFace, x, y) =>
@@ -244,6 +289,6 @@ export function buildToolStart(flange, userSettings = {}) {
     dims: { plateOuter, plateThickness: t, holeD, headD, seat, spigotOuter: hasSpigot ? spigotOuter : null,
             bore: hasSpigot ? bore : null, hasPin, collarInner: hasCollar ? collarInner : null,
             collarOuter: hasCollar ? collarOuter : null, depth: hasSpigot ? depth : null, pinLength, centreHole: hasSpigot ? null : (g.centreHole?.diameter ?? 0),
-            dowelD, profile, chamferCuts, chamfer: { robot: chRobot, away: chAway, size: c } },
+            dowelD, keyCount, profile, chamferCuts, chamfer: { robot: chRobot, away: chAway, size: c } },
   };
 }

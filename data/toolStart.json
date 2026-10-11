@@ -261,9 +261,19 @@
         "label": "Full (solid)"
       }
     ],
-    "usedIn": [
+        "usedIn": [
       "plate-spigot",
       "plate-spigot-collar"
     ]
+  },
+  "wallKeys": {
+    "description": "Some flanges have pockets cut into a wall (wallPockets in flanges.json). When on, the tool start gets one key per pocket so it locks into them.",
+    "default": true,
+    "spigotKeys": "Pockets in the flange centre hole wall: a key sticks out of the spigot wall. Plate + Spigot and Plate + Spigot + Collar.",
+    "collarKeys": "Pockets in the flange raised spigot wall: a key sticks inward from the collar wall. Plate + Spigot + Collar only.",
+    "keyDiameter": "pocket diameter - 2 x tolerance of the wall that touches it (spigot tolerance for spigot keys, collar tolerance for collar keys)",
+    "keyLength": "min(shared depth, pocket depth - that tolerance), so the key ends on the same plane as the spigot or collar",
+    "direction": "Angles are measured from the pin hole, seen from the tool side. 'clockwise' or 'counterclockwise' is set per flange in flanges.json.",
+    "chamfer": "Keys are not chamfered."
   }
 }
