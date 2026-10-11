@@ -3,6 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import flangeData from "../data/flanges.json";
 import ts from "../data/toolStart.json";
 import { initFooterLinks } from './footerLinks.js';
+import { initToolEnd } from './toolEnd.js';
 
 const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
 const $ = (id) => document.getElementById(id);
@@ -102,7 +103,7 @@ const scene = new THREE.Scene();
 const setTheme = (light) => { document.body.classList.toggle("light", light); scene.background = new THREE.Color(light ? 0xf4f4f4 : 0x1e1f22); localStorage.setItem("theme", light ? "light" : "dark"); };
 const tb = Object.assign(document.createElement("button"), { textContent: "Light / dark" }); tb.onclick = () => setTheme(!document.body.classList.contains("light"));
 Object.assign(tb.style, { position: "absolute", top: "8px", right: "8px" }); view.append(tb); setTheme(localStorage.getItem("theme") === "light");const cam = new THREE.PerspectiveCamera(40, 1, 1, 2000); cam.up.set(0, 0, 1); cam.position.set(90, -90, 70);
-new OrbitControls(cam, renderer.domElement);
+const orbit = new OrbitControls(cam, renderer.domElement);
 scene.add(new THREE.HemisphereLight(0xffffff, 0x888888, 1.2)); const dl = new THREE.DirectionalLight(0xffffff, 1.5); dl.position.set(50, -80, 120); scene.add(dl);
 const grid = new THREE.GridHelper(200, 20, 0x999999, 0xcccccc); grid.rotation.x = Math.PI / 2; scene.add(grid); scene.add(new THREE.AxesHelper(30));
 let mesh = null;
@@ -129,3 +130,4 @@ document.querySelectorAll("button[data-f]").forEach((b) => (b.onclick = () => wo
 refreshAll(); build();
 
 initFooterLinks(); 
+initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers, isAdvanced: () => advanced });
