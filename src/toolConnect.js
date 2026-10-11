@@ -153,7 +153,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart }) 
     const d = st.dims, R = S.conn === "partial" ? (d.spigotOuter ? d.spigotOuter / 2 : d.centreHole / 2 + d.thickness) : null;
     const a = startTris(st), b = endTris();
     setInfo("", "Computing design space…");
-    worker.postMessage({ type: "domain", id: ++reqId, h: S.h, band: S.band, budget: S.budget, maxCells: tc.maxGridCells, R, startTris: a, endTris: b }, [a.buffer, b.buffer]);
+    worker.postMessage({ type: "domain", id: ++reqId, h: S.h, band: S.band, budget: S.budget, maxCells: tc.maxGridCells, zClip: d.thickness, R, startTris: a, endTris: b }, [a.buffer, b.buffer]);
   }
 
   document.addEventListener("stage", (e) => {
