@@ -4,6 +4,7 @@ import flangeData from "../data/flanges.json";
 import ts from "../data/toolStart.json";
 import { initFooterLinks } from './footerLinks.js';
 import { initToolEnd } from './toolEnd.js';
+import { initToolConnect } from './toolConnect.js';
 
 const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
 const $ = (id) => document.getElementById(id);
@@ -14,7 +15,7 @@ const tolCfg = ts.tolerances;
 const settings = { fitMode: ts.fitMode.default, thickness: ts.thickness.default, dowelMode: ts.dowel.mode.default, headSeat: ts.screwClearance.headSeat.default,
   plateMargin: ts.plateEdgeMargin.default, spigotStyle: ts.spigotStyle.default, wallKeys: ts.wallKeys.default, chamfer: { robotFacing: false, awayFacing: false, size: ts.chamfer.size.default },
   tolerances: Object.fromEntries(Object.entries(tolCfg).filter(([, v]) => typeof v === "object").map(([k, v]) => [k, v.default])) };
-let advanced = false, reqId = 0, timer = null;
+let advanced = false, reqId = 0, timer = null, startInfo = null;
 const refreshers = [];
 const g = () => cur.flange.geometry;
 
@@ -124,10 +125,11 @@ worker.onmessage = (e) => {
   if (m.id !== reqId) return;
   $("status").textContent = m.ok ? "Ready" : "Cannot build";
   $("msg").innerHTML = [...(m.errors || []).map((x) => `<div class="bad">✖ ${x}</div>`), ...(m.warnings || []).map((x) => `<div class="warn">⚠ ${x}</div>`)].join("");
-  if (m.ok) show(m.mesh);
+  if (m.ok) { show(m.mesh); startInfo = m; }
 };
 document.querySelectorAll("button[data-f]").forEach((b) => (b.onclick = () => worker.postMessage({ type: "export", id: reqId, format: b.dataset.f })));
 refreshAll(); build();
 
 initFooterLinks(); 
-initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers, isAdvanced: () => advanced });
+const toolEnd = initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers });
+initToolConnect({ scene, cam, renderer, $, toolEnd, getStart: () => startInfo });
