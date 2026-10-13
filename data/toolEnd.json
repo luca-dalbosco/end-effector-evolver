@@ -11,6 +11,7 @@
     { "id": "tetrahedron", "label": "Tetrahedron" },
     { "id": "octahedron", "label": "Octahedron" },
     { "id": "dodecahedron", "label": "Dodecahedron" },
-    { "id": "icosahedron", "label": "Icosahedron" }
+    { "id": "icosahedron", "label": "Icosahedron" },
+    { "id": "cuboctahedron", "label": "Cuboctahedron" }
   ]
 }
