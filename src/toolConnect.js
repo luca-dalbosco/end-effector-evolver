@@ -7,7 +7,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const dom = renderer.domElement;
   const ADV = { budget: tc.analysisVoxelBudget.default, rmin: tc.filterRadius.default, iters: tc.maxIterations.default, mass: tc.payloadMassKg.default, accel: tc.accelFactor.default, gdir: tc.gravityDirection.default, fx: 0, fy: 0, fz: 0, sp: tc.smooth.passes.default };
   const vfOf = (id) => tc.strength.options.find((o) => o.id === id).vf;
-  const S = { conn: tc.toolStartConnection.default, h: tc.voxelSize.default, band: tc.designSpace.default, str: tc.strength.default, vf: vfOf(tc.strength.default), print: tc.printReady.default, refineEnd: tc.refineAtEnd.default, bd: tc.bolt.diameterAdjustMm.default, bl: tc.bolt.lengthAdjustMm.default, ...ADV };
+  const S = { conn: tc.toolStartConnection.default, h: tc.voxelSize.default, band: tc.designSpace.default, str: tc.strength.default, vf: vfOf(tc.strength.default), print: tc.printReady.default, refineEnd: tc.refineAtEnd.default, bd: tc.bolt.diameterAdjustMm.default, bl: tc.bolt.lengthAdjustMm.default, bshape: tc.bolt.shape.default, bslot: tc.bolt.slotLengthMm.default, ...ADV };
   let advanced = false, active = false, running = false, worker = null, reqId = 0, optId = 0, timer = null, secPerElem = null, lastStats = null, tStart = 0;
   let chain = false, sag = null, arrow = null, cog = null; // chain: Generate runs optimize → clearance → refine in one go
   let curPart = null, hl = null, prev = [], result = null, ghost = null, gid = 0, canClear = false, refined = false, coarseGhost = null, predGen = null, predRef = null;
@@ -32,7 +32,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const advL = document.createElement("label"), advC = Object.assign(document.createElement("input"), { type: "checkbox" });
   advC.onchange = () => {
     advanced = advC.checked;
-    if (!advanced) { S.vf = vfOf(S.str); S.h = clamp(S.h, tc.voxelSize); S.band = clamp(S.band, tc.designSpace); Object.assign(S, ADV); avoid.forEach((en) => (en.mm = clamp(en.mm, cfgOf(en)))); robot.mm = clamp(robot.mm, tc.avoid.robotOffsetMm); S.bd = clamp(S.bd, tc.bolt.diameterAdjustMm); S.bl = clamp(S.bl, tc.bolt.lengthAdjustMm); drawRobot(); renderAvoid(); }
+    if (!advanced) { S.vf = vfOf(S.str); S.h = clamp(S.h, tc.voxelSize); S.band = clamp(S.band, tc.designSpace); Object.assign(S, ADV); avoid.forEach((en) => (en.mm = clamp(en.mm, cfgOf(en)))); robot.mm = clamp(robot.mm, tc.avoid.robotOffsetMm); S.bd = clamp(S.bd, tc.bolt.diameterAdjustMm); S.bl = clamp(S.bl, tc.bolt.lengthAdjustMm); S.bslot = clamp(S.bslot, tc.bolt.slotLengthMm); drawRobot(); renderAvoid(); }
     sync(); schedule();
   };
   advL.append(advC, " Advanced mode (type any value)"); panel.append(advL);
@@ -60,8 +60,14 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const boltInfo = document.createElement("div"); boltInfo.style.cssText = "font-size:12px;margin-bottom:4px"; panel.append(boltInfo);
   numRow("Diameter adjust (mm)", tc.bolt.diameterAdjustMm, "bd");
   numRow("Length adjust (mm)", tc.bolt.lengthAdjustMm, "bl");
-  panel.append(btn("Reset bolt clearance", () => { S.bd = tc.bolt.diameterAdjustMm.default; S.bl = tc.bolt.lengthAdjustMm.default; sync(); drawRobot(); schedule(); }));
-  refreshers.push(() => { const b = keepOut()?.bolts, sc = b?.filter((x) => !x.pin), pin = b?.find((x) => x.pin); boltInfo.textContent = b ? `Above each of the ${sc.length} screws: a slot ${(2 * sc[0].r).toFixed(2)} mm wide, ${(sc[0].z1 - sc[0].z0).toFixed(2)} mm high (head Ø + 0.25, head height + 0.25), running straight outward from the flange centre so every screw stays reachable.` + (pin ? ` Above the dowel: ${(2 * pin.r).toFixed(2)} mm wide.` : "") : "No screw data for this flange."; });
+  const bsRow = document.createElement("div"); bsRow.className = "row"; bsRow.innerHTML = "<label>Shape</label>";
+  const bsSel = document.createElement("select"); tc.bolt.shape.options.forEach((o) => bsSel.add(new Option(o.label, o.id)));
+  bsSel.onchange = () => { S.bshape = bsSel.value; sync(); drawRobot(); schedule(); };
+  bsRow.append(bsSel); panel.append(bsRow);
+  refreshers.push(() => (bsSel.value = S.bshape));
+  numRow("Slot length (mm)", tc.bolt.slotLengthMm, "bslot", () => S.bshape !== "slot");
+  panel.append(btn("Reset bolt clearance", () => { S.bd = tc.bolt.diameterAdjustMm.default; S.bl = tc.bolt.lengthAdjustMm.default; S.bshape = tc.bolt.shape.default; S.bslot = tc.bolt.slotLengthMm.default; sync(); drawRobot(); schedule(); }));
+  refreshers.push(() => { const b = keepOut()?.bolts, sc = b?.filter((x) => !x.pin), pin = b?.find((x) => x.pin); boltInfo.textContent = b ? `Above each of the ${sc.length} screws: ${S.bshape === "slot" ? `a slot ${(2 * sc[0].r).toFixed(2)} mm wide, ${(sc[0].z1 - sc[0].z0).toFixed(2)} mm high, running ${S.bslot} mm outward from the flange centre (keeps inner screws reachable)` : `a cylinder Ø ${(2 * sc[0].r).toFixed(2)} mm, ${(sc[0].z1 - sc[0].z0).toFixed(2)} mm high`} (head Ø + 0.25, head height + 0.25).` + (pin ? ` Above the dowel: ${(2 * pin.r).toFixed(2)} mm wide.` : "") : "No screw data for this flange."; });
   const cfgOf = (en) => (en.kind === "face" ? tc.avoid.faceExtrudeMm : tc.avoid.objectGrowMm);
   function renderAvoid() {
     syncPart(); pruneAvoid(); avoidBox.innerHTML = "";
@@ -102,9 +108,9 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     const R = st.dims.plateOuter / 2, sc = st.dims.screws, t = st.dims.thickness;
     const bolts = [];
     if (sc && sc.headH) {
-      const len = Math.max(0.1, sc.headH + tc.bolt.lengthMarginMm + S.bl), r = Math.max(0.1, (st.dims.headD + S.bd) / 2);
-      sc.angles.forEach((a) => bolts.push({ x: sc.pcdR * Math.cos((a * Math.PI) / 180), y: sc.pcdR * Math.sin((a * Math.PI) / 180), r, z0: t, z1: t + len, len: tc.bolt.slotLengthMm, pin: false }));
-      if (st.dims.pinHole) bolts.push({ x: sc.pcdR, y: 0, r: Math.max(0.1, (st.dims.dowelD + tc.bolt.diameterMarginMm + S.bd) / 2), z0: t, z1: t + len, len: tc.bolt.slotLengthMm, pin: true }); // the dowel sits on the pitch circle at angle 0
+      const len = Math.max(0.1, sc.headH + tc.bolt.lengthMarginMm + S.bl), slot = S.bshape === "slot" ? Math.max(0, S.bslot) : 0, r = Math.max(0.1, (st.dims.headD + S.bd) / 2);
+      sc.angles.forEach((a) => bolts.push({ x: sc.pcdR * Math.cos((a * Math.PI) / 180), y: sc.pcdR * Math.sin((a * Math.PI) / 180), r, z0: t, z1: t + len, len: slot, pin: false }));
+      if (st.dims.pinHole) bolts.push({ x: sc.pcdR, y: 0, r: Math.max(0.1, (st.dims.dowelD + tc.bolt.diameterMarginMm + S.bd) / 2), z0: t, z1: t + len, len: slot, pin: true }); // the dowel sits on the pitch circle at angle 0
     }
     return { R, zTop: t, zMin, robotR: R + robot.mm, bolts: bolts.length ? bolts : null, bed: S.print };
   }
