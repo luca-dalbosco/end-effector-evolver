@@ -45,6 +45,17 @@
     "shrinkStep": { "min": 0.01, "max": 0.2, "step": 0.01, "default": 0.03, "note": "Share of the material cap removed per shrink round." },
     "minVolumeFraction": { "min": 0.2, "max": 1, "step": 0.05, "default": 0.6, "note": "The material may not drop below this share of the coarse volume." }
   },
+  "smooth": {
+    "strength": {
+      "default": "medium",
+      "options": [
+        { "id": "light", "label": "Light", "passes": 1 },
+        { "id": "medium", "label": "Medium", "passes": 2 },
+        { "id": "strong", "label": "Strong", "passes": 4 }
+      ]
+    },
+    "passes": { "min": 1, "max": 10, "step": 1, "default": 2, "recommendedRange": [1, 4], "note": "Smoothing passes per click (each pass blurs the shape by about one voxel). More = rounder, but thin members get thinner. The volume is kept." }
+  },
   "estimate": { "cgIterationsPerStep": 50, "overheadFactor": 1.5, "greenBelowMinutes": 5, "yellowBelowMinutes": 15 },
   "maxGridCells": 3000000
 }

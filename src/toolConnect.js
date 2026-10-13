@@ -4,7 +4,7 @@ import tc from "../data/toolConnect.json";
 
 export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, list }) {
   const dom = renderer.domElement;
-  const ADV = { budget: tc.analysisVoxelBudget.default, rmin: tc.filterRadius.default, iters: tc.maxIterations.default, mass: tc.payloadMassKg.default, accel: tc.accelFactor.default, gdir: tc.gravityDirection.default, fx: 0, fy: 0, fz: 0 };
+  const ADV = { budget: tc.analysisVoxelBudget.default, rmin: tc.filterRadius.default, iters: tc.maxIterations.default, mass: tc.payloadMassKg.default, accel: tc.accelFactor.default, gdir: tc.gravityDirection.default, fx: 0, fy: 0, fz: 0, sp: tc.smooth.passes.default };
   const S = { conn: tc.toolStartConnection.default, h: tc.voxelSize.default, band: tc.designSpace.default, vf: tc.volumeFraction.default, bd: tc.bolt.diameterAdjustMm.default, bl: tc.bolt.lengthAdjustMm.default, ...ADV };
   let advanced = false, active = false, running = false, worker = null, reqId = 0, optId = 0, timer = null, secPerElem = null, lastStats = null, tStart = 0;
   let curPart = null, hl = null, prev = [], result = null, ghost = null, gid = 0, canClear = false, refined = false, coarseGhost = null, predGen = null, predRef = null;
@@ -185,6 +185,24 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     rfHint.textContent = !lastStats || !canClear ? "Generate a design first." : canRefine() ? `Analysis voxel ${lastStats.h.toFixed(2)} mm → refined voxel ${S.h} mm.` : "The analysis voxel is already as fine as the voxel size. Lower the voxel size (Voxels) to refine.";
   });
 
+  head("Smoothing");
+  const smNote = document.createElement("div"); smNote.className = "rec";
+  smNote.textContent = "Tip: Refine first, then smooth (a finer voxel gives a nicer shape). Each Smooth click rounds the voxel steps a little more and keeps the volume. Connect surfaces stay in place. Smoothing fills the red zones a little, so click Cut clearance after smoothing (as often as you like). The voxel Apply clearance above resets smoothing.";
+  const smRow = document.createElement("div"); smRow.className = "row"; smRow.innerHTML = "<label>Smoothing strength</label>";
+  const smSel = document.createElement("select"); tc.smooth.strength.options.forEach((o) => smSel.add(new Option(o.label, o.id)));
+  smSel.value = tc.smooth.strength.default; smSel.onchange = () => { S.sp = tc.smooth.strength.options.find((o) => o.id === smSel.value).passes; sync(); };
+  smRow.append(smSel); panel.append(smNote, smRow);
+  numRow("Smoothing passes per click", tc.smooth.passes, "sp", () => !advanced, false);
+  const smOut = document.createElement("div"); smOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
+  const smSend = (msg, text) => { if (!worker || !canClear) return; smOut.textContent = text; worker.postMessage({ ...msg, id: ++gid }); };
+  const bSmooth = btn("Smooth", () => smSend({ type: "smooth", passes: S.sp }, "Smoothing…")), bCut = btn("Cut clearance", () => smSend({ type: "smoothClear" }, "Cutting…"));
+  const bUnsmooth = btn("Reset to voxels", () => smSend({ type: "smoothReset" }, "Resetting…"));
+  panel.append(bSmooth, bCut, bUnsmooth, smOut);
+  refreshers.push(() => {
+    bSmooth.disabled = bCut.disabled = bUnsmooth.disabled = running || !canClear;
+    const o = tc.smooth.strength.options.find((x) => x.passes === S.sp); if (o) smSel.value = o.id;
+  });
+
   const selfBox = document.createElement("div"), selfOut = document.createElement("div"); selfOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
   selfBox.append(btn("Run solver self-test", () => { selfOut.textContent = "Running…"; ensureWorker().postMessage({ type: "selftest" }); }), selfOut); panel.append(selfBox);
   refreshers.push(() => { count.textContent = `${picked.size} face(s) selected`; sel.value = S.conn; gSel.value = S.gdir; gRow.style.display = advanced ? "" : "none"; advC.checked = advanced; selfBox.style.display = advanced ? "" : "none"; });
@@ -318,7 +336,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   function clearPrev() { prev.forEach((m) => { scene.remove(m); m.geometry.dispose(); }); prev = []; clearGhost(); }
   const ghostCoarseMat = new THREE.MeshStandardMaterial({ color: 0x4a7fb5, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide });
   function clearCoarseGhost() { if (coarseGhost) { scene.remove(coarseGhost); coarseGhost.geometry.dispose(); coarseGhost = null; } }
-  function clearResult() { canClear = false; clrOut.textContent = ""; if (result) { scene.remove(result); result.geometry.dispose(); result = null; } }
+  function clearResult() { canClear = false; clrOut.textContent = ""; smOut.textContent = ""; if (result) { scene.remove(result); result.geometry.dispose(); result = null; } }
   const ghostMat = new THREE.MeshStandardMaterial({ color: 0xff9800, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide });
   function ghostPreview() { if (worker && lastStats && !running) worker.postMessage({ type: "clearPreview", id: ++gid }); }
   function applyClearance() { if (!worker || !canClear) return; clrOut.textContent = "Clearing…"; worker.postMessage({ type: "clear" }); }
@@ -386,6 +404,15 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     }
     if (m.type === "selftest") { selfOut.innerHTML = (m.more ? selfOut.innerHTML : "") + m.results.map((r) => `<div class="${r.ok === null ? "" : r.ok ? "ok" : "bad"}">${r.ok === null ? "ℹ" : r.ok ? "✔" : "✖"} ${r.text}</div>`).join(""); return; }
     if (m.type === "clearPreview") { if (m.id === gid) { clearGhost(); if (m.mesh.i.length) ghost = meshOf(m.mesh, ghostMat); } return; }
+    if (m.type === "smoothed") {
+      if (m.id !== gid) return;
+      if (!m.ok) { smOut.innerHTML = `<span class="bad">✖ ${m.error}</span>`; return; }
+      showResult(m.mesh); canClear = true; sync();
+      const t = m.stats;
+      smOut.innerHTML = m.reset ? `<span class="ok">Back to voxels.</span>`
+        : `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔" : "⚠ The tool start and the tool end are no longer connected."} ${m.op === "smoothClear" ? `Cut ${t.cut.toLocaleString()} cells in the zones. ` : ""}${t.islands ? `${t.islands.toLocaleString()} loose cells dropped. ` : ""}Volume ${t.volCm3.toFixed(1)} cm³, ${t.tris.toLocaleString()} triangles.</span>`;
+      return;
+    }
     if (m.type === "cleared") {
       if (!m.ok) { clrOut.innerHTML = `<span class="bad">✖ ${m.error}</span>`; return; }
       const t = m.stats; showResult(m.mesh); canClear = true; sync();
