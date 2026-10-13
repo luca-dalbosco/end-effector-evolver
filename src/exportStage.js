@@ -18,7 +18,7 @@ export function initExport({ worker, $, list, toolEnd, toolConnect, getStart, ge
   const optBox = el("div", "", "margin:0 0 6px 22px");
   const cStart = Object.assign(el("input"), { type: "checkbox" }), cEnd = Object.assign(el("input"), { type: "checkbox" });
   cStart.onchange = () => { S.withStart = cStart.checked; refresh(); }; cEnd.onchange = () => { S.withEnd = cEnd.checked; refresh(); };
-  optBox.append(labelled(cStart, "Include the tool start"), labelled(cEnd, "Include the tool end (the part the connector joins)"));
+  optBox.append(labelled(cStart, "Include the robot side"), labelled(cEnd, "Include the tool (the part the connector joins)"));
   radios[1].parentElement.after(optBox);
   const sum = el("div", "", "font-size:12px;line-height:1.5;margin:8px 0");
   panel.append(sum);
@@ -31,14 +31,13 @@ export function initExport({ worker, $, list, toolEnd, toolConnect, getStart, ge
   const resBox = el("div"); resBox.append(head("Mesh resolution"));
   const resSel = selectOf(ex.resolution.options, (v) => { const o = ex.resolution.options.find((x) => x.id === v); S.res = v; S.tol = o.toleranceMm; S.ang = o.angleDeg; });
   const customOpt = new Option("Custom (typed below)", "custom"); customOpt.disabled = true; resSel.add(customOpt);
-  const resNote = note("Applies to the tool start and the tool end. The connector is already a mesh, it is written as you see it.");
+  const resNote = note("Applies to the robot side and the tool. The connector is already a mesh, it is written as you see it.");
   const advBox = el("div", "", "margin-top:6px");
   const tolIn = numberOf(ex.toleranceMm, (v) => (S.tol = v)), angIn = numberOf(ex.angleDeg, (v) => (S.ang = v));
   advBox.append(labelled(tolIn, "Max deviation (mm)", "display:block;margin:4px 0"), note(ex.toleranceMm.note), labelled(angIn, "Max angle (°)", "display:block;margin:4px 0"), note(ex.angleDeg.note));
   resBox.append(resSel, resNote, advBox);
   panel.append(resBox);
-  const cAdv = Object.assign(el("input"), { type: "checkbox" }); cAdv.onchange = () => { advanced = cAdv.checked; refresh(); };
-  panel.append(labelled(cAdv, "Advanced mode (type any value)", "display:block;margin:10px 0 4px"));
+  document.addEventListener("advanced", (e) => { if (e.detail.stage === "D") { advanced = e.detail.on; refresh(); } });
 
   const bGo = el("button", "Export"); bGo.onclick = go; bGo.style.cssText = "margin-top:12px;padding:8px 18px;font-weight:700";
   const out = el("div", "", "font-size:12px;line-height:1.5;margin-top:8px");
@@ -49,18 +48,18 @@ export function initExport({ worker, $, list, toolEnd, toolConnect, getStart, ge
   function collect() {
     const res = toolConnect.getResult(), endObj = toolEnd.getPart();
     const parts = list.items().filter((i) => i.sid != null); // tool-end parts and every other object the user added
-    const role = (i) => (i.object === endObj ? " (tool end)" : toolConnect.isAvoided(i) ? " (avoid)" : "");
+    const role = (i) => (i.object === endObj ? " (tool)" : toolConnect.isAvoided(i) ? " (avoid)" : "");
     const part = (i, tag) => ({ name: i.name + (tag ? role(i) : ""), src: "part", sid: i.sid, pos: i.object.position.toArray(), rot: [i.object.rotation.x, i.object.rotation.y, i.object.rotation.z] });
-    const start = { name: "Tool start", src: "start" }, conn = res && { name: "Connector", src: "mesh", v: res.p, t: res.i };
+    const start = { name: "Robot side", src: "start" }, conn = res && { name: "Connector", src: "mesh", v: res.p, t: res.i };
     const items = [], notes = [];
     if (S.scope === "start") {
-      if (!getStart()) return { error: "The tool start is not built yet." };
+      if (!getStart()) return { error: "The robot side is not built yet." };
       items.push(start);
     } else if (S.scope === "tool") {
       if (!conn) return { error: "No connector yet. Make one in step 3 (Generate)." };
       if (S.withStart) items.push(start);
       items.push(conn);
-      if (S.withEnd) { const e = parts.find((i) => i.object === endObj); if (e) items.push(part(e, false)); else notes.push("There is no tool end part to include."); }
+      if (S.withEnd) { const e = parts.find((i) => i.object === endObj); if (e) items.push(part(e, false)); else notes.push("There is no tool part to include."); }
     } else {
       if (getStart()) items.push(start);
       if (conn) items.push(conn); else notes.push("No connector yet (step 3), so it is left out.");
@@ -68,17 +67,16 @@ export function initExport({ worker, $, list, toolEnd, toolConnect, getStart, ge
     }
     return { items, notes };
   }
-  const baseName = (items) => (S.scope === "start" ? `tool_start_${getFlangeId()}` : S.scope === "all" ? "end_effector" : items.length === 1 ? "connector" : "tool");
+  const baseName = (items) => (S.scope === "start" ? `robot_side_${getFlangeId()}` : S.scope === "all" ? "end_effector" : items.length === 1 ? "connector" : "tool");
 
   function refresh() {
     radios.forEach((r) => (r.checked = r.value === S.scope));
     optBox.style.display = S.scope === "tool" ? "" : "none";
-    cStart.checked = S.withStart; cEnd.checked = S.withEnd; cAdv.checked = advanced;
-    fmt.value = S.format; resSel.value = S.res; customOpt.hidden = S.res !== "custom";
+    cStart.checked = S.withStart; cEnd.checked = S.withEnd;    fmt.value = S.format; resSel.value = S.res; customOpt.hidden = S.res !== "custom";
     resBox.style.display = S.format === "step" ? "none" : "";
     advBox.style.display = advanced ? "" : "none"; tolIn.value = S.tol; angIn.value = S.ang;
     fmtNote.textContent = S.format === "step"
-      ? "Exact CAD faces for the tool start and the tool end. The connector is a mesh, so STEP is not available while it is in the file."
+      ? "Exact CAD faces for the robot side and the tool. The connector is a mesh, so STEP is not available while it is in the file."
       : S.format === "3mf" ? "One file. Every object stays a separate object inside it." : "One file for one object. With several objects you get a .zip with one STL each.";
     const c = collect(), hasConn = !!c.items?.some((i) => i.src === "mesh");
     if (hasConn && S.format === "step") S.format = ex.format.default; // the connector is a mesh: no STEP

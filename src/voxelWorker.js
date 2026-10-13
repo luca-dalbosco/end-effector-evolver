@@ -392,10 +392,10 @@ function bridge(m) {
     area += A; for (let a = 0; a < 3; a++) { cB[a] += (A * (E[q + a] + E[q + 3 + a] + E[q + 6 + a])) / 3; nS[a] += cr[a]; }
     for (let i = 0; i < 9; i++) pts.push(E[q + i]);
   }
-  if (!(area > 0)) throw new Error("No tool end face selected.");
+  if (!(area > 0)) throw new Error("No tool face selected.");
   for (let a = 0; a < 3; a++) cB[a] /= area;
   const cA = [0, 0, zTop], ax = [cB[0], cB[1], cB[2] - zTop], L = Math.hypot(...ax);
-  if (L < 1e-3) throw new Error("The picked faces sit on the flange centre. Move the tool end away from the tool start.");
+  if (L < 1e-3) throw new Error("The picked faces sit on the flange centre. Move the tool away from the robot side.");
   const u = ax.map((v) => v / L), nl = Math.hypot(...nS);
   const pn = nl > 0.3 * area ? nS.map((v) => v / nl) : u.map((v) => -v); // plane of the picked faces (or across the axis if they face many ways)
   const sg = pn[0] * (cA[0] - cB[0]) + pn[1] * (cA[1] - cB[1]) + pn[2] * (cA[2] - cB[2]) >= 0 ? 1 : -1;
@@ -478,8 +478,8 @@ function compute(m) {
   let A = samplePoints(m.startTris, h, m.R); const bo = m.keepOut?.bolts;
   if (bo) { const keep = []; for (let i = 0; i < A.length; i += 3) if (!bo.some((b) => A[i + 2] >= b.z0 - h && A[i + 2] <= b.z1 && slotDist(b, A[i], A[i + 1]) <= b.r)) keep.push(A[i], A[i + 1], A[i + 2]); A = keep; }
   const B = samplePoints(m.endTris, h, null);
-  if (!A.length) throw new Error("The tool start has no connect surface here. Try 'Entire top surface'.");
-  if (!B.length) throw new Error("No tool end face selected.");
+  if (!A.length) throw new Error("The robot side has no connect surface here. Try 'Entire top surface'.");
+  if (!B.length) throw new Error("No tool face selected.");
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], ca = [0, 0, 0], cb = [0, 0, 0];
   for (const [P, c] of [[A, ca], [B, cb]]) for (let i = 0; i < P.length; i += 3) for (let a = 0; a < 3; a++) {
     lo[a] = Math.min(lo[a], P[i + a]); hi[a] = Math.max(hi[a], P[i + a]); c[a] += P[i + a] / (P.length / 3);
@@ -502,7 +502,7 @@ function compute(m) {
     const fA = field(srcA), fB = field(srcB);
     let best = Infinity;
     for (let c = 0; c < N; c++) { const s = Math.sqrt(fA[c]) + Math.sqrt(fB[c]); if (s < best) best = s; }
-    if (best < 1) throw new Error("The tool start and the picked faces touch or overlap. Move the tool end away from the tool start.");
+    if (best < 1) throw new Error("The robot side and the picked faces touch or overlap. Move the tool away from the robot side.");
     const thr = best * (1 + m.band);
     const kS = voxelizeSolid(m.startAll, nx, ny, nz, org, h), kE = voxelizeSolid(m.endAll, nx, ny, nz, org, h);
     const free = new Uint8Array(N), vis = new Uint8Array(N), uni = new Uint8Array(N), lost = new Uint8Array(N), av = m.avoid?.length ? avoidMask(m.avoid, nx, ny, nz, org, h) : null, ko = m.keepOut ? keepOutMask(m.keepOut, nx, ny, nz, org, h) : null;
@@ -516,7 +516,7 @@ function compute(m) {
         free[c] = 1; vis[c] = 1; count++; nFree++;
       }
     }
-    if (!connected(vis, srcA, srcB, nx, ny, nz)) throw new Error("The tool start, the tool end or a red zone (including Robot Avoidance) blocks the way between the surfaces. Make the red zones smaller (for example a lower robot offset) or increase the design space size." + (m.keepOut?.bed ? " Print-ready is on: nothing may grow below the flange face." : ""));
+    if (!connected(vis, srcA, srcB, nx, ny, nz)) throw new Error("The robot side, the tool or a red zone (including Robot Avoidance) blocks the way between the surfaces. Make the red zones smaller (for example a lower robot offset) or increase the design space size." + (m.keepOut?.bed ? " Print-ready is on: nothing may grow below the flange face." : ""));
     if (count > m.budget * 1.1 && !retried) { retried = true; h *= Math.cbrt(count / m.budget) * 1.02; continue; }
     const fixed = new Uint8Array(N); for (let c = 0; c < N; c++) if (kS[c] || (ko && ko[c])) fixed[c] = 1;
     state = { nx, ny, nz, h, org, srcA, srcB, free, cog, fixed, avoid: m.avoid || [], input: m, mat: rf ? rf.mat : null };
