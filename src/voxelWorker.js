@@ -2,7 +2,7 @@
 // Pure JavaScript, no geometry kernel. Units: mm.
 
 import { createFem, selfTest } from "./fem.js";
-import { optimize, refineSelfTest } from "./optimizer.js";
+import { optimize, refineSelfTest, amSelfTest } from "./optimizer.js";
 import tc from "../data/toolConnect.json";
 const tcRefine = Object.fromEntries(Object.entries(tc.refine).map(([k, v]) => [k, v.default]));
 import { voxelizeSolid, connected, solidCentroid, nodalLoads } from "./voxelize.js";
@@ -127,18 +127,31 @@ function avoidMask(items, nx, ny, nz, org, h) {
   return out;
 }
 
+// Print-ready: the first layer whose cell centres are on or above the bed (the tool start top face). Everything below it is blocked.
+const bedLayer = (k, org, h) => Math.ceil((k.zTop - org[2]) / h - 0.5);
+
+// Bolt Clearance is a slot: head diameter wide, from the bolt straight outward (away from the flange centre) for b.len mm.
+// Distance in XY from a point to the slot centre line.
+function slotDist(b, x, y) {
+  const l = Math.hypot(b.x, b.y), ux = l > 1e-9 ? b.x / l : 0, uy = l > 1e-9 ? b.y / l : 0;
+  const t = Math.min(b.len, Math.max(0, (x - b.x) * ux + (y - b.y) * uy));
+  return Math.hypot(x - b.x - ux * t, y - b.y - uy * t);
+}
+
 // The tool start is never touched (plate cylinder), and nothing grows below it (Robot Avoidance cylinder).
+// Print-ready (k.bed): nothing grows below the bed at all.
 function keepOutMask(k, nx, ny, nz, org, h) {
-  const out = new Uint8Array(nx * ny * nz), r2 = k.R * k.R, rr2 = k.robotR * k.robotR;
+  const out = new Uint8Array(nx * ny * nz), r2 = k.R * k.R, rr2 = k.robotR * k.robotR, kb = k.bed ? bedLayer(k, org, h) : -1;
   for (let z = 0; z < nz; z++) {
+    if (z < kb) { out.fill(1, nx * ny * z, nx * ny * (z + 1)); continue; }
     const cz = org[2] + (z + 0.5) * h, lock = cz >= k.zMin && cz <= k.zTop, rob = cz < k.zMin; if (!lock && !rob) continue;
     const lim = lock ? r2 : rr2;
     for (let y = 0; y < ny; y++) { const cy = org[1] + (y + 0.5) * h; for (let x = 0; x < nx; x++) { const cx = org[0] + (x + 0.5) * h; if (cx * cx + cy * cy <= lim) out[x + nx * (y + ny * z)] = 1; } }
   }
-  for (const b of k.bolts || []) { // Bolt Clearance: a cylinder above every screw head and the dowel hole
+  for (const b of k.bolts || []) { // Bolt Clearance: a slot above every screw head and the dowel hole
     for (let z = 0; z < nz; z++) {
       const cz = org[2] + (z + 0.5) * h; if (cz < b.z0 || cz > b.z1) continue;
-      for (let y = 0; y < ny; y++) { const dy = org[1] + (y + 0.5) * h - b.y; for (let x = 0; x < nx; x++) { const dx = org[0] + (x + 0.5) * h - b.x; if (dx * dx + dy * dy <= b.r * b.r) out[x + nx * (y + ny * z)] = 1; } }
+      for (let y = 0; y < ny; y++) { const cy = org[1] + (y + 0.5) * h; for (let x = 0; x < nx; x++) if (slotDist(b, org[0] + (x + 0.5) * h, cy) <= b.r) out[x + nx * (y + ny * z)] = 1; }
     }
   }
   return out;
@@ -182,7 +195,19 @@ function clearance() {
   let islands = 0; for (let c = 0; c < N; c++) if (mask[c] && !seen[c]) { mask[c] = 0; islands++; }
   const connectedAB = reachedB;
   S.cleared = mask; S.smooth = null;
-  return { mesh: exposed(mask, nx, ny, nz, h, org), stats: { before, cut, islands, after: before - cut - islands, connected: connectedAB } };
+  const after = before - cut - islands;
+  return { mesh: exposed(mask, nx, ny, nz, h, org), stats: { before, cut, islands, after, connected: connectedAB, volCm3: (after * h ** 3) / 1000, overhang: overhangs(mask, S) } };
+}
+
+// Print-ready only: voxels with nothing under them (none of the 5 cells below, 45° rule) that are not on the bed or a connect surface. null when not print-ready.
+function overhangs(mask, S) {
+  const k = S.input.keepOut; if (!k?.bed) return null;
+  const { nx, ny, nz } = S, L = nx * ny, kb = bedLayer(k, S.org, S.h); let n = 0;
+  for (let z = Math.max(1, kb + 1); z < nz; z++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
+    const c = x + nx * (y + ny * z), d = c - L; if (!mask[c] || S.srcA[c] || S.srcB[c]) continue;
+    if (!(mask[d] || (x > 0 && mask[d - 1]) || (x < nx - 1 && mask[d + 1]) || (y > 0 && mask[d - nx]) || (y < ny - 1 && mask[d + nx]))) n++;
+  }
+  return n;
 }
 
 // ---------- Smoothing ----------
@@ -322,7 +347,7 @@ const GDIR = { "-X": [-1, 0, 0], "+X": [1, 0, 0], "-Y": [0, -1, 0], "+Y": [0, 1,
 function compute(m) {
   let h = m.h;
   let A = samplePoints(m.startTris, h, m.R); const bo = m.keepOut?.bolts;
-  if (bo) { const keep = []; for (let i = 0; i < A.length; i += 3) if (!bo.some((b) => A[i + 2] >= b.z0 - h && A[i + 2] <= b.z1 && Math.hypot(A[i] - b.x, A[i + 1] - b.y) <= b.r)) keep.push(A[i], A[i + 1], A[i + 2]); A = keep; }
+  if (bo) { const keep = []; for (let i = 0; i < A.length; i += 3) if (!bo.some((b) => A[i + 2] >= b.z0 - h && A[i + 2] <= b.z1 && slotDist(b, A[i], A[i + 1]) <= b.r)) keep.push(A[i], A[i + 1], A[i + 2]); A = keep; }
   const B = samplePoints(m.endTris, h, null);
   if (!A.length) throw new Error("The tool start has no connect surface here. Try 'Entire top surface'.");
   if (!B.length) throw new Error("No tool end face selected.");
@@ -362,7 +387,7 @@ function compute(m) {
         free[c] = 1; vis[c] = 1; count++; nFree++;
       }
     }
-    if (!connected(vis, srcA, srcB, nx, ny, nz)) throw new Error("The tool start, the tool end or a red zone (including Robot Avoidance) blocks the way between the surfaces. Make the red zones smaller (for example a lower robot offset) or increase the design space size.");
+    if (!connected(vis, srcA, srcB, nx, ny, nz)) throw new Error("The tool start, the tool end or a red zone (including Robot Avoidance) blocks the way between the surfaces. Make the red zones smaller (for example a lower robot offset) or increase the design space size." + (m.keepOut?.bed ? " Print-ready is on: nothing may grow below the flange face." : ""));
     if (count > m.budget * 1.1 && !retried) { retried = true; h *= Math.cbrt(count / m.budget) * 1.02; continue; }
     const fixed = new Uint8Array(N); for (let c = 0; c < N; c++) if (kS[c] || (ko && ko[c])) fixed[c] = 1;
     state = { nx, ny, nz, h, org, srcA, srcB, free, cog, fixed, avoid: m.avoid || [], input: m, mat: rf ? rf.mat : null };
@@ -392,11 +417,21 @@ async function runOptimize(m) {
   if (Math.hypot(...F) < 1e-9) throw new Error("The load is zero. Check payload mass and extra force.");
   const loads = nodalLoads(pos, F, S.cog);
   ids.forEach((n, q) => { for (let d = 0; d < 3; d++) force[3 * n + d] = loads[3 * q + d]; });
+  // sag in mm: the solver works with E = 1, a voxel of 1 and a load scaled to 1 N (nodalLoads), the real stiffness is E × h,
+  // so movement along the load = compliance × |F| / (E × h)
+  const sag = (c) => (c * Math.hypot(...F)) / (tc.material.youngsModulusMPa * h);
+  let am = null;
+  const ko = S.input.keepOut;
+  if (ko?.bed) { // print-ready: cells of the first layer rest on the bed
+    const base = new Uint8Array(N), kb = bedLayer(ko, org, h);
+    if (kb >= 0 && kb < nz) base.fill(1, nx * ny * kb, nx * ny * (kb + 1));
+    am = { base, P: tc.printReady.smoothMaxPower, eps: tc.printReady.smoothMinEps, start: tc.printReady.startDensity };
+  }
 
   const meshOf = (rho) => { const mask = new Uint8Array(N); for (let c = 0; c < N; c++) if (active[c] && rho[c] > 0.5) mask[c] = 1; return exposed(mask, nx, ny, nz, h, org); };
   const bufs = (mesh) => [mesh.p.buffer, mesh.n.buffer, mesh.i.buffer];
   const t0 = performance.now();
-  let P = { nx, ny, nz, active, passive, fixedMask, force, vf: m.vf, rmin: m.rmin, maxIter: m.maxIter };
+  let P = { nx, ny, nz, active, passive, fixedMask, force, vf: m.vf, rmin: m.rmin, maxIter: m.maxIter, am };
   if (m.refine) { // start from the coarse design, keep the coarse volume as the cap, same filter radius in mm
     const par = S.parent, nFreeCells = S.free.reduce((a, v) => a + v, 0);
     let coarse = 0; for (let c = 0; c < par.cleared.length; c++) if (par.cleared[c] && par.free[c]) coarse++;
@@ -412,11 +447,11 @@ async function runOptimize(m) {
   S.result = res.rho; S.active = active; S.cleared = null; S.smooth = null;
   if (m.refine) { // drop loose pieces and check the connection, as in the Clearance step
     const r = clearance(), par = S.parent;
-    postMessage({ type: "done", refine: true, id: m.id, ok: true, it: res.it, c: res.c, c0: res.c0, vol: res.vol, stopped: res.stopped, converged: res.converged, elapsed: performance.now() - t0, mesh: r.mesh, stats: r.stats, h, hc: par.h, cap: P.vf, cRef: res.cRef }, bufs(r.mesh));
+    postMessage({ type: "done", refine: true, id: m.id, ok: true, it: res.it, c: res.c, c0: res.c0, vol: res.vol, stopped: res.stopped, converged: res.converged, elapsed: performance.now() - t0, mesh: r.mesh, stats: r.stats, h, hc: par.h, cap: P.vf, cRef: res.cRef, sag: sag(res.c) }, bufs(r.mesh));
     return;
   }
   const mesh = meshOf(res.rho);
-  postMessage({ type: "done", id: m.id, ok: true, it: res.it, c: res.c, c0: res.c0, vol: res.vol, stopped: res.stopped, converged: res.converged, elapsed: performance.now() - t0, mesh }, bufs(mesh));
+  postMessage({ type: "done", id: m.id, ok: true, it: res.it, c: res.c, c0: res.c0, vol: res.vol, stopped: res.stopped, converged: res.converged, elapsed: performance.now() - t0, mesh, sag: sag(res.c) }, bufs(mesh));
 }
 
 // Coarse material after the last Generate or Clearance (connect-surface cells included).
@@ -442,9 +477,9 @@ onmessage = async (e) => {
   if (m.type === "selftest") {
     running = true;
     try {
-      postMessage({ type: "selftest", results: selfTest() });
-      const rf = tcRefine;
-      postMessage({ type: "selftest", more: true, results: await refineSelfTest(rf.stiffnessTolerance, rf.shrinkStep, rf.minVolumeFraction) });
+      postMessage({ type: "selftest", results: selfTest([tc.cantileverRatio.min, tc.cantileverRatio.max]) });
+      const rf = tcRefine, pr = tc.printReady;
+      postMessage({ type: "selftest", more: true, results: [...amSelfTest(pr.smoothMaxPower, pr.smoothMinEps), ...await refineSelfTest(rf.stiffnessTolerance, rf.shrinkStep, rf.minVolumeFraction)] });
     } catch (err) { postMessage({ type: "selftest", more: true, results: [{ ok: false, text: "Self-test crashed: " + err.message }] }); }
     finally { running = false; }
     return;

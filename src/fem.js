@@ -105,7 +105,8 @@ export function createFem({ nx, ny, nz, active = null, Emin = 1e-6, p = 3, nu = 
 }
 
 // Self-test: three checks that must pass, and one comparison with beam theory.
-export function selfTest() {
+// ratio = [min, max] allowed for cantilever tip drop / beam theory (from data/toolConnect.json)
+export function selfTest(ratioRange = [0.7, 1.05]) {
   const out = [], ones = (n) => new Float64Array(n).fill(1);
   const Ke = hexKe(); let t = 0;
   for (let d = 0; d < 3; d++) for (let i = 0; i < 24; i++) { let s = 0; for (let a = 0; a < 8; a++) s += Ke[i * 24 + 3 * a + d]; t = Math.max(t, Math.abs(s)); }
@@ -130,7 +131,7 @@ export function selfTest() {
     out.push({ ok: Math.abs(c1 - c2) / c1 < 1e-6, text: `Energy check: load × movement ${c1.toFixed(5)} equals the sum over elements ${c2.toFixed(5)}` });
   }
 
-  { // cantilever beam compared with beam theory (information, not exact)
+  { // cantilever beam compared with beam theory: proves the solver bends like a real beam (these elements are slightly too stiff, so a little below 1)
     const nx = 24, ny = 4, nz = 4, fem = createFem({ nx, ny, nz }), nd = fem.node;
     fem.setDensity(ones(fem.nel));
     const fx = new Uint8Array(fem.ndof), f = new Float64Array(fem.ndof), u = new Float64Array(fem.ndof), w = (j, k) => (j === 0 || j === ny ? 0.5 : 1) * (k === 0 || k === nz ? 0.5 : 1);
@@ -142,7 +143,7 @@ export function selfTest() {
     const t0 = performance.now(), s = fem.solve(f, u, 1e-8, 5000), ms = performance.now() - t0;
     let tip = 0; for (let j = 0; j <= ny; j++) for (let k = 0; k <= nz; k++) tip += (-u[3 * nd(nx, j, k) + 2] * w(j, k)) / (ny * nz);
     const I = (ny * nz ** 3) / 12, G = 1 / (2 * 1.3), ref = nx ** 3 / (3 * I) + nx / ((5 / 6) * G * ny * nz), ratio = tip / ref;
-    out.push({ ok: s.rel < 1e-6 && ratio > 0.5 && ratio < 1.1 ? null : false, text: `Cantilever beam: tip drop ${tip.toFixed(1)} vs beam theory ${ref.toFixed(1)} (ratio ${ratio.toFixed(2)}, a little below 1 is normal for these elements), ${s.iters} solver steps, ${ms.toFixed(0)} ms` });
+    out.push({ ok: s.rel < 1e-6 && ratio >= ratioRange[0] && ratio <= ratioRange[1], text: `Cantilever beam: tip drop ${tip.toFixed(1)} vs beam theory ${ref.toFixed(1)} (ratio ${ratio.toFixed(2)}, must be ${ratioRange[0]} to ${ratioRange[1]}), ${s.iters} solver steps, ${ms.toFixed(0)} ms` });
   }
   return out;
 }
