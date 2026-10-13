@@ -1,0 +1,28 @@
+{
+  "voxelSize": { "min": 0.5, "max": 2, "step": 0.1, "default": 1.5, "recommendedRange": [0.5, 2], "note": "Display and export voxel size. The analysis may use a coarser voxel to stay fast." },
+  "designSpace": { "min": 0.05, "max": 2, "step": 0.05, "default": 0.25, "recommendedRange": [0.1, 0.4], "note": "How far the connector may wander from the straight path, as a fraction of the gap between the surfaces." },
+  "analysisVoxelBudget": { "min": 1000, "max": 200000, "step": 1000, "default": 6000, "recommendedRange": [3000, 40000], "note": "Maximum voxels in the design space. Fewer = much faster." },
+  "quality": {
+    "options": [
+      { "id": "draft", "label": "Draft (fast, rough shape)", "budget": 6000, "iters": 40 },
+      { "id": "normal", "label": "Normal", "budget": 20000, "iters": 60 },
+      { "id": "fine", "label": "Fine (slow)", "budget": 40000, "iters": 80 }
+    ]
+  },
+  "toolStartConnection": {
+    "default": "entire",
+    "options": [
+      { "id": "entire", "label": "Entire top surface" },
+      { "id": "partial", "label": "Partial (spigot area only)" }
+    ]
+  },
+  "volumeFraction": { "min": 0.05, "max": 0.6, "step": 0.01, "default": 0.25, "recommendedRange": [0.1, 0.4], "note": "Share of the design space that may be filled. Left = light, right = strong." },
+  "filterRadius": { "min": 1.2, "max": 4, "step": 0.1, "default": 2, "recommendedRange": [1.5, 3], "note": "In voxels. Bigger = thicker, smoother members." },
+  "maxIterations": { "min": 10, "max": 300, "step": 10, "default": 40, "recommendedRange": [30, 100], "note": "The design stops earlier when it stops changing." },
+  "payloadMassKg": { "min": 0.1, "max": 100, "step": 0.1, "default": 2, "note": "Mass of the tool end and what it carries." },
+  "accelFactor": { "min": 1, "max": 10, "step": 0.5, "default": 3, "recommendedRange": [2, 5], "note": "Multiplier for robot motion (1 = standing still)." },
+  "gravityDirection": { "default": "-Y", "options": ["-Z", "+Z", "-X", "+X", "-Y", "+Y"] },
+  "extraForceN": { "min": -1000, "max": 1000, "step": 1, "default": 0, "note": "Optional extra force at the centre of mass of the tool end." },
+  "estimate": { "cgIterationsPerStep": 50, "overheadFactor": 1.5, "greenBelowMinutes": 5, "yellowBelowMinutes": 15 },
+  "maxGridCells": 3000000
+}

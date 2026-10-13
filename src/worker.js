@@ -28,7 +28,7 @@ onmessage = async (e) => {
       const { buildPrimitive } = m.type === "primitive" ? await import("./primitives.js") : {};
       imp = m.type === "import" ? await importSTEP(new Blob([m.data])) : buildPrimitive(m.kind, m.size);
       const me = imp.mesh({ tolerance: 0.05, angularTolerance: 0.2 });
-      postMessage({ imported: true, ok: true, name: m.name, kind: m.kind, keep: m.keep,
+      postMessage({ imported: true, ok: true, name: m.name, kind: m.kind, keep: m.keep, fg: me.faceGroups,
         mesh: { v: Float32Array.from(me.vertices), n: Float32Array.from(me.normals), t: Uint32Array.from(me.triangles) } });
     } catch (err) { imp = null; postMessage({ imported: true, ok: false, error: String(err) }); }
     return;
@@ -42,7 +42,8 @@ onmessage = async (e) => {
       const me = last.mesh({ tolerance: 0.03, angularTolerance: 0.15 });
       const d = r.dims;
       postMessage({ id: m.id, ok: true, warnings: r.warnings,
-        dims: { plateOuter: d.plateOuter, holeD: d.holeD, headD: d.headD, seatLength: d.seat.length, bore: d.bore, depth: d.depth, collarOuter: d.collarOuter },
+        dims: { plateOuter: d.plateOuter, holeD: d.holeD, headD: d.headD, seatLength: d.seat.length, bore: d.bore, depth: d.depth, collarOuter: d.collarOuter,
+                thickness: d.plateThickness, spigotOuter: d.spigotOuter, centreHole: d.centreHole },
         mesh: { v: Float32Array.from(me.vertices), n: Float32Array.from(me.normals), t: Uint32Array.from(me.triangles) } });
     } else if (m.type === "export" && last) {
       let data;
