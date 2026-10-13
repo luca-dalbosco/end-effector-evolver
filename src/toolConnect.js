@@ -589,9 +589,13 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
 
   document.addEventListener("stage", (e) => {
     active = e.detail === "C"; list.setVis(robotRow, active ? 1 : 2); list.setVis(boltRow, active ? 1 : 2); if (ghost) ghost.visible = active; if (arrow) arrow.visible = active && S.method === "optimize"; if (coarseGhost) coarseGhost.visible = active; panel.style.display = active ? "" : "none";
-    prev.forEach((m) => (m.visible = active && !result)); if (result) result.visible = active;
+    prev.forEach((m) => (m.visible = active && !result)); if (result) result.visible = active || e.detail === "D"; // stage D (Export) shows the connector too
     if (active) renderAvoid();
     if (active && !running) { sync(); run(); }
   });
   renderAvoid(); sync();
+  return { // used by stage D (Export)
+    getResult: () => (result && !running && (canClear || bridged) && result.geometry.index ? { p: result.geometry.getAttribute("position").array, i: result.geometry.index.array } : null),
+    isAvoided: (it) => avoid.some((en) => en.it === it),
+  };
 }
