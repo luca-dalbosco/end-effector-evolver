@@ -43,7 +43,7 @@ onmessage = async (e) => {
       const d = r.dims;
       postMessage({ id: m.id, ok: true, warnings: r.warnings,
         dims: { plateOuter: d.plateOuter, holeD: d.holeD, headD: d.headD, seatLength: d.seat.length, bore: d.bore, depth: d.depth, collarOuter: d.collarOuter,
-                thickness: d.plateThickness, spigotOuter: d.spigotOuter, centreHole: d.centreHole },
+                thickness: d.plateThickness, spigotOuter: d.spigotOuter, centreHole: d.centreHole, screws: d.screws, pinHole: d.hasPin && d.pinLength === null, dowelD: d.dowelD },
         mesh: { v: Float32Array.from(me.vertices), n: Float32Array.from(me.normals), t: Uint32Array.from(me.triangles) } });
     } else if (m.type === "export" && last) {
       let data;

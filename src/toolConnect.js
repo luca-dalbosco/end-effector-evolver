@@ -5,9 +5,9 @@ import tc from "../data/toolConnect.json";
 export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, list }) {
   const dom = renderer.domElement;
   const ADV = { budget: tc.analysisVoxelBudget.default, rmin: tc.filterRadius.default, iters: tc.maxIterations.default, mass: tc.payloadMassKg.default, accel: tc.accelFactor.default, gdir: tc.gravityDirection.default, fx: 0, fy: 0, fz: 0 };
-  const S = { conn: tc.toolStartConnection.default, h: tc.voxelSize.default, band: tc.designSpace.default, vf: tc.volumeFraction.default, ...ADV };
+  const S = { conn: tc.toolStartConnection.default, h: tc.voxelSize.default, band: tc.designSpace.default, vf: tc.volumeFraction.default, bd: tc.bolt.diameterAdjustMm.default, bl: tc.bolt.lengthAdjustMm.default, ...ADV };
   let advanced = false, active = false, running = false, worker = null, reqId = 0, optId = 0, timer = null, secPerElem = null, lastStats = null, tStart = 0;
-  let curPart = null, hl = null, prev = [], result = null;
+  let curPart = null, hl = null, prev = [], result = null, ghost = null, gid = 0, canClear = false;
   const picked = new Set();
   const robot = { mm: tc.avoid.robotOffsetMm.default }; // "Robot Avoidance": offset of the always-red cylinder below the tool start
   const avoid = []; // red items: { key, kind: "obj" | "face", it (list row), obj (its 3D group), fi (face), mm, ov (red overlay) }
@@ -24,7 +24,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const advL = document.createElement("label"), advC = Object.assign(document.createElement("input"), { type: "checkbox" });
   advC.onchange = () => {
     advanced = advC.checked;
-    if (!advanced) { S.h = clamp(S.h, tc.voxelSize); S.band = clamp(S.band, tc.designSpace); Object.assign(S, ADV); avoid.forEach((en) => (en.mm = clamp(en.mm, cfgOf(en)))); robot.mm = clamp(robot.mm, tc.avoid.robotOffsetMm); drawRobot(); renderAvoid(); }
+    if (!advanced) { S.h = clamp(S.h, tc.voxelSize); S.band = clamp(S.band, tc.designSpace); Object.assign(S, ADV); avoid.forEach((en) => (en.mm = clamp(en.mm, cfgOf(en)))); robot.mm = clamp(robot.mm, tc.avoid.robotOffsetMm); S.bd = clamp(S.bd, tc.bolt.diameterAdjustMm); S.bl = clamp(S.bl, tc.bolt.lengthAdjustMm); drawRobot(); renderAvoid(); }
     sync(); schedule();
   };
   advL.append(advC, " Advanced mode (type any value)"); panel.append(advL);
@@ -48,11 +48,17 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   head("Avoid (red)");
   const avoidBox = document.createElement("div"); avoidBox.style.cssText = "font-size:12px";
   panel.append(avoidBox, btn("Clear avoided", () => { avoid.splice(0).forEach(dropEntry); renderAvoid(); schedule(); }));
+  head("Bolt Clearance");
+  const boltInfo = document.createElement("div"); boltInfo.style.cssText = "font-size:12px;margin-bottom:4px"; panel.append(boltInfo);
+  numRow("Diameter adjust (mm)", tc.bolt.diameterAdjustMm, "bd");
+  numRow("Length adjust (mm)", tc.bolt.lengthAdjustMm, "bl");
+  panel.append(btn("Reset bolt clearance", () => { S.bd = tc.bolt.diameterAdjustMm.default; S.bl = tc.bolt.lengthAdjustMm.default; sync(); drawRobot(); schedule(); }));
+  refreshers.push(() => { const b = keepOut()?.bolts, sc = b?.filter((x) => !x.pin), pin = b?.find((x) => x.pin); boltInfo.textContent = b ? `Above each of the ${sc.length} screws: Ø ${(2 * sc[0].r).toFixed(2)} mm, ${(sc[0].z1 - sc[0].z0).toFixed(2)} mm long (head Ø + 0.25, head height + 0.25).` + (pin ? ` Above the dowel: Ø ${(2 * pin.r).toFixed(2)} mm.` : "") : "No screw data for this flange."; });
   const cfgOf = (en) => (en.kind === "face" ? tc.avoid.faceExtrudeMm : tc.avoid.objectGrowMm);
   function renderAvoid() {
     syncPart(); pruneAvoid(); avoidBox.innerHTML = "";
     const addRow = (text, c, get, set, unit, onRemove) => {
-      const row = document.createElement("div"); row.style.cssText = "display:flex;gap:4px;align-items:center;margin:3px 0";
+      const row = document.createElement("div"); row.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:3px 0";
       const lab = document.createElement("span"); lab.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"; lab.textContent = text; lab.title = c.note;
       const n = Object.assign(document.createElement("input"), { type: "number", step: c.step, value: get() }); n.style.width = "64px";
       n.onchange = () => { let v = +n.value; if (n.value === "" || isNaN(v) || v < 0) { n.value = get(); return; } if (!advanced) v = clamp(v, c); set(v); n.value = v; schedule(); };
@@ -63,7 +69,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     addRow("Robot Avoidance (below the tool start)", tc.avoid.robotOffsetMm, () => robot.mm, (v) => { robot.mm = v; drawRobot(); }, "mm offset");
     avoid.forEach((en) => addRow(
       en.kind === "face" ? `Face ${en.fi + 1} of ${en.it.name}` : en.it.name + (en.obj === curPart ? " (tool end: ignored)" : ""),
-      cfgOf(en), () => en.mm, (v) => (en.mm = v), en.kind === "face" ? "mm out" : "mm grow",
+      cfgOf(en), () => en.mm, (v) => (en.mm = v), en.kind === "face" ? "mm gap out" : "mm gap",
       () => { avoid.splice(avoid.indexOf(en), 1); dropEntry(en); renderAvoid(); schedule(); }));
     const loose = list.items().filter((i) => i.deletable !== false && i.object !== curPart && !avoid.some((en) => en.it === i));
     if (loose.length) {
@@ -78,16 +84,32 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const robotGroup = new THREE.Group(); scene.add(robotGroup);
   const robotRow = list.add({ name: "Robot Avoidance", object: robotGroup, deletable: false });
   list.setVis(robotRow, 2); // hidden until step 3 (Generate)
+  const boltMat = new THREE.MeshBasicMaterial({ color: 0xff9800, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
+  const boltGroup = new THREE.Group(); scene.add(boltGroup);
+  const boltRow = list.add({ name: "Bolt Clearance", object: boltGroup, deletable: false });
+  list.setVis(boltRow, 2);
   function keepOut() { // plate cylinder from the bottom of the tool start up to the top face; robot cylinder below it
     const st = getStart(); if (!st) return null;
     const v = st.mesh.v; let zMin = Infinity; for (let i = 2; i < v.length; i += 3) zMin = Math.min(zMin, v[i]);
-    const R = st.dims.plateOuter / 2; return { R, zTop: st.dims.thickness, zMin, robotR: R + robot.mm };
+    const R = st.dims.plateOuter / 2, sc = st.dims.screws, t = st.dims.thickness;
+    const bolts = [];
+    if (sc && sc.headH) {
+      const len = Math.max(0.1, sc.headH + tc.bolt.lengthMarginMm + S.bl), r = Math.max(0.1, (st.dims.headD + S.bd) / 2);
+      sc.angles.forEach((a) => bolts.push({ x: sc.pcdR * Math.cos((a * Math.PI) / 180), y: sc.pcdR * Math.sin((a * Math.PI) / 180), r, z0: t, z1: t + len, pin: false }));
+      if (st.dims.pinHole) bolts.push({ x: sc.pcdR, y: 0, r: Math.max(0.1, (st.dims.dowelD + tc.bolt.diameterMarginMm + S.bd) / 2), z0: t, z1: t + len, pin: true }); // the dowel sits on the pitch circle at angle 0
+    }
+    return { R, zTop: t, zMin, robotR: R + robot.mm, bolts: bolts.length ? bolts : null };
   }
   function drawRobot() {
     robotGroup.children.slice().forEach((m) => { robotGroup.remove(m); m.geometry.dispose(); });
     const k = keepOut(); if (!k) return;
     const cyl = (r, z0, z1) => { const g = new THREE.CylinderGeometry(r, r, z1 - z0, 64); g.rotateX(Math.PI / 2); g.translate(0, 0, (z0 + z1) / 2); const m = new THREE.Mesh(g, robotMat); m.raycast = () => {}; robotGroup.add(m); };
     cyl(k.R, k.zMin, k.zTop); cyl(k.robotR, k.zMin - tc.avoid.robotLengthMm, k.zMin);
+    boltGroup.children.slice().forEach((m) => { boltGroup.remove(m); m.geometry.dispose(); });
+    for (const b of k.bolts || []) {
+      const g = new THREE.CylinderGeometry(b.r, b.r, b.z1 - b.z0, 32); g.rotateX(Math.PI / 2); g.translate(b.x, b.y, (b.z0 + b.z1) / 2);
+      const m = new THREE.Mesh(g, boltMat); m.raycast = () => {}; boltGroup.add(m);
+    }
   }
   document.addEventListener("startbuilt", () => { drawRobot(); if (active) schedule(); });
   drawRobot();
@@ -137,6 +159,13 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const bar = Object.assign(document.createElement("progress"), { max: 1, value: 0 }); bar.style.cssText = "width:100%;margin-top:6px";
   const prog = document.createElement("div"); prog.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
   panel.append(bGo, bStop, bar, prog);
+
+  head("Clearance");
+  const clrNote = document.createElement("div"); clrNote.className = "rec";
+  clrNote.textContent = "Deletes result voxels inside the red zones (with their mm gap), the tool start, Robot Avoidance and Bolt Clearance, then drops loose pieces. The tool end itself is not cleared. Orange ghost = the gap you set around red items.";
+  const bClear = btn("Apply clearance", () => applyClearance()), clrOut = document.createElement("div"); clrOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
+  bClear.disabled = true; panel.append(clrNote, bClear, clrOut);
+  refreshers.push(() => { bClear.disabled = running || !canClear; });
 
   const selfBox = document.createElement("div"), selfOut = document.createElement("div"); selfOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
   selfBox.append(btn("Run solver self-test", () => { selfOut.textContent = "Running…"; ensureWorker().postMessage({ type: "selftest" }); }), selfOut); panel.append(selfBox);
@@ -267,8 +296,12 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     bg.setAttribute("position", new THREE.BufferAttribute(x.p, 3)); bg.setAttribute("normal", new THREE.BufferAttribute(x.n, 3)); bg.setIndex(new THREE.BufferAttribute(x.i, 1));
     const m = new THREE.Mesh(bg, mat); m.visible = active; scene.add(m); return m;
   };
-  function clearPrev() { prev.forEach((m) => { scene.remove(m); m.geometry.dispose(); }); prev = []; }
-  function clearResult() { if (result) { scene.remove(result); result.geometry.dispose(); result = null; } }
+  function clearGhost() { if (ghost) { scene.remove(ghost); ghost.geometry.dispose(); ghost = null; } }
+  function clearPrev() { prev.forEach((m) => { scene.remove(m); m.geometry.dispose(); }); prev = []; clearGhost(); }
+  function clearResult() { canClear = false; clrOut.textContent = ""; if (result) { scene.remove(result); result.geometry.dispose(); result = null; } }
+  const ghostMat = new THREE.MeshStandardMaterial({ color: 0xff9800, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide });
+  function ghostPreview() { if (worker && lastStats && !running) worker.postMessage({ type: "clearPreview", id: ++gid }); }
+  function applyClearance() { if (!worker || !canClear) return; clrOut.textContent = "Clearing…"; worker.postMessage({ type: "clear" }); }
   function setPrev(d, s, a) { clearPrev(); clearResult(); prev = [meshOf(d, domMat), meshOf(s, srcMat)]; if (a && a.i.length) prev.push(meshOf(a, avoidMat)); }
   const showResult = (d) => { clearResult(); result = meshOf(d, resMat); };
 
@@ -293,6 +326,13 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     const m = e.data;
     if (m.type === "bench") { secPerElem = m.secPerElem; return showEstimate(); }
     if (m.type === "selftest") { selfOut.innerHTML = m.results.map((r) => `<div class="${r.ok === null ? "" : r.ok ? "ok" : "bad"}">${r.ok === null ? "ℹ" : r.ok ? "✔" : "✖"} ${r.text}</div>`).join(""); return; }
+    if (m.type === "clearPreview") { if (m.id === gid) { clearGhost(); if (m.mesh.i.length) ghost = meshOf(m.mesh, ghostMat); } return; }
+    if (m.type === "cleared") {
+      if (!m.ok) { clrOut.innerHTML = `<span class="bad">✖ ${m.error}</span>`; return; }
+      const t = m.stats; showResult(m.mesh); canClear = true; sync();
+      clrOut.innerHTML = `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔" : "⚠ The tool start and the tool end are no longer connected."} Deleted ${t.cut.toLocaleString()} voxels in zones and ${t.islands.toLocaleString()} loose voxels. ${t.after.toLocaleString()} of ${t.before.toLocaleString()} voxels remain.</span>`;
+      return;
+    }
     if (m.type === "progress") {
       if (m.id !== optId) return;
       bar.value = m.it / m.maxIter;
@@ -305,13 +345,13 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
       if (m.id !== optId) return;
       setLock(false);
       if (!m.ok) { prev.forEach((x) => (x.visible = active)); prog.innerHTML = `<span class="bad">✖ ${m.error}</span>`; return; }
-      showResult(m.mesh); bar.value = m.stopped ? bar.value : 1;
+      showResult(m.mesh); canClear = true; sync(); bar.value = m.stopped ? bar.value : 1;
       prog.innerHTML = `<span class="ok">${m.stopped ? "Stopped" : m.converged ? "Finished (stopped changing)" : "Finished (step limit)"} after ${m.it} steps in ${fmt(m.elapsed)}: ${(m.c0 / m.c).toFixed(1)}× stiffer than the start, material ${(m.vol * 100).toFixed(0)}% of the design space.</span>`;
       return;
     }
     if (m.id !== reqId) return; // design space result
     if (!m.ok) { lastStats = null; bGo.disabled = true; clearPrev(); return setInfo("bad", "✖ " + m.error); }
-    lastStats = m.stats; bGo.disabled = false; setPrev(m.dom, m.src, m.avoid); showEstimate();
+    lastStats = m.stats; bGo.disabled = false; setPrev(m.dom, m.src, m.avoid); showEstimate(); ghostPreview();
   }
   function ensureWorker() {
     if (!worker) { worker = new Worker(new URL("./voxelWorker.js", import.meta.url), { type: "module" }); worker.onmessage = onMsg; worker.postMessage({ type: "bench" }); }
@@ -322,7 +362,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     if (!st) return setInfo("warn", "Tool start is not ready yet.");
     if (!curPart) { bGo.disabled = true; return setInfo("warn", "Add a part in step 2 (Tool end) first."); }
     if (!picked.size) { lastStats = null; bGo.disabled = true; clearPrev(); clearResult(); return setInfo("warn", "Click one or more faces of the tool end to choose where the connector attaches. They turn green."); }
-    ensureWorker(); bGo.disabled = true;
+    ensureWorker(); bGo.disabled = true; drawRobot();
     const d = st.dims, R = S.conn === "partial" ? (d.spigotOuter ? d.spigotOuter / 2 : d.centreHole / 2 + d.thickness) : null;
     const a = startTris(st, false), b = endTris(false), sa = startTris(st, true), ea = endTris(true), av = avoidData(), ko = keepOut();
     setInfo("", "Computing design space…");
@@ -336,7 +376,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   }
 
   document.addEventListener("stage", (e) => {
-    active = e.detail === "C"; list.setVis(robotRow, active ? 1 : 2); panel.style.display = active ? "" : "none";
+    active = e.detail === "C"; list.setVis(robotRow, active ? 1 : 2); list.setVis(boltRow, active ? 1 : 2); if (ghost) ghost.visible = active; panel.style.display = active ? "" : "none";
     prev.forEach((m) => (m.visible = active && !result)); if (result) result.visible = active;
     if (active) renderAvoid();
     if (active && !running) { sync(); run(); }

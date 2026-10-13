@@ -289,6 +289,7 @@ export function buildToolStart(flange, userSettings = {}) {
     dims: { plateOuter, plateThickness: t, holeD, headD, seat, spigotOuter: hasSpigot ? spigotOuter : null,
             bore: hasSpigot ? bore : null, hasPin, collarInner: hasCollar ? collarInner : null,
             collarOuter: hasCollar ? collarOuter : null, depth: hasSpigot ? depth : null, pinLength, centreHole: hasSpigot ? null : (g.centreHole?.diameter ?? 0),
-            dowelD, keyCount, profile, chamferCuts, chamfer: { robot: chRobot, away: chAway, size: c } },
+            dowelD, keyCount, profile, chamferCuts, chamfer: { robot: chRobot, away: chAway, size: c },
+            screws: { pcdR, angles, headH: head ? head.h : 0 } },
   };
 }

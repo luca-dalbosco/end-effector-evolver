@@ -24,10 +24,16 @@
   "gravityDirection": { "default": "-Y", "options": ["-Z", "+Z", "-X", "+X", "-Y", "+Y"] },
   "extraForceN": { "min": -1000, "max": 1000, "step": 1, "default": 0, "note": "Optional extra force at the centre of mass of the tool end." },
   "avoid": {
-    "faceExtrudeMm": { "min": 0, "max": 50, "step": 0.5, "default": 3, "recommendedRange": [1, 10], "note": "How far a red face is pushed outward. Nothing can grow inside this zone." },
+    "faceExtrudeMm": { "min": 0, "max": 50, "step": 0.5, "default": 0, "recommendedRange": [0, 10], "note": "Gap: how far a red face is pushed outward. Nothing can grow inside this zone. 0 = only the face itself." },
     "robotOffsetMm": { "min": 0, "max": 50, "step": 1, "default": 5, "recommendedRange": [3, 15], "note": "Keep-out cylinder below the tool start: plate diameter plus this offset on each side. Nothing grows inside it." },
     "robotLengthMm": 100,
-    "objectGrowMm": { "min": 0, "max": 30, "step": 0.5, "default": 2, "recommendedRange": [1, 5], "note": "How far a red object is offset (grown evenly in all directions) for extra clearance." }
+    "objectGrowMm": { "min": 0, "max": 30, "step": 0.5, "default": 0, "recommendedRange": [0, 5], "note": "Gap: how far a red object is offset (grown evenly in all directions). 0 = only the object itself." }
+  },
+  "bolt": {
+    "lengthMarginMm": 0.25,
+    "diameterMarginMm": 0.25,
+    "diameterAdjustMm": { "min": -1, "max": 10, "step": 0.25, "default": 0, "recommendedRange": [0, 2], "note": "Added to the head clearance diameter of the tool start (Allen head + 0.25)." },
+    "lengthAdjustMm": { "min": -1, "max": 50, "step": 0.25, "default": 0, "recommendedRange": [0, 5], "note": "Added to the head height + 0.25 of the tool start." }
   },
   "estimate": { "cgIterationsPerStep": 50, "overheadFactor": 1.5, "greenBelowMinutes": 5, "yellowBelowMinutes": 15 },
   "maxGridCells": 3000000
