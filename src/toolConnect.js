@@ -36,7 +36,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart }) 
   head("Tool end faces");
   const count = document.createElement("div"), hint = document.createElement("div"); hint.className = "rec";
   hint.textContent = "Click a face of the tool end in the 3D view to connect to it. Click again to unselect.";
-  panel.append(count, hint, btn("Clear faces", () => { picked.clear(); updateHighlight(); schedule(); }));
+  panel.append(count, hint, btn("Clear faces", () => { picked.clear(); updateHighlight(); sync(); schedule(); }));
 
   function numRow(label, cfg, key, hidden = () => false) {
     const d = document.createElement("div"); d.className = "row";
