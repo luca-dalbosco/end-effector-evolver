@@ -71,6 +71,7 @@ export function initObjectList({ view }) {
     remove, select,
     items: () => items,
     setName: (it, name) => { it.name = unique(name, it); render(); },
+    setVis: (it, v) => { it.vis = v; apply(it); render(); }, // 0 visible, 1 transparent, 2 not visible
     refreshVisibility: () => items.forEach(apply), // call after an object's mesh was replaced
     onSelect: (fn) => (pick = fn),
   };

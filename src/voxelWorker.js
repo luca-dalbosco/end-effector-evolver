@@ -93,6 +93,49 @@ function exposed(mask, nx, ny, nz, h, org) {
   return { p, n, i: ix };
 }
 
+// Marks every cell a red item blocks. "solid": the whole object grown by mm. "face": the face pushed outward by mm along its normal.
+function avoidMask(items, nx, ny, nz, org, h) {
+  const N = nx * ny * nz, out = new Uint8Array(N), step = h * 0.5;
+  const cell = (x, y, z) => {
+    const i = Math.floor((x - org[0]) / h), j = Math.floor((y - org[1]) / h), k = Math.floor((z - org[2]) / h);
+    if (i >= 0 && j >= 0 && k >= 0 && i < nx && j < ny && k < nz) out[i + nx * (j + ny * k)] = 1;
+  };
+  for (const it of items) {
+    if (it.kind === "obj") {
+      const m = voxelizeSolid(it.tris, nx, ny, nz, org, h);
+      if (it.mm > 0) { // exact offset: distance from each cell centre to the nearest object cell centre (the half voxel makes it err on the safe side)
+        const f = new Float32Array(N); for (let c = 0; c < N; c++) f[c] = m[c] ? 0 : BIG; edt(f, nx, ny, nz);
+        const lim = (it.mm + 0.5 * h) / h; for (let c = 0; c < N; c++) if (Math.sqrt(f[c]) <= lim) out[c] = 1;
+      } else for (let c = 0; c < N; c++) if (m[c]) out[c] = 1;
+    } else {
+      const t = it.tris;
+      for (let q = 0; q < t.length; q += 9) {
+        const ux = t[q + 3] - t[q], uy = t[q + 4] - t[q + 1], uz = t[q + 5] - t[q + 2], wx = t[q + 6] - t[q], wy = t[q + 7] - t[q + 1], wz = t[q + 8] - t[q + 2];
+        let nxx = uy * wz - uz * wy, nyy = uz * wx - ux * wz, nzz = ux * wy - uy * wx;
+        const nl = Math.hypot(nxx, nyy, nzz); if (nl < 1e-12) continue;
+        nxx /= nl; nyy /= nl; nzz /= nl;
+        const k = Math.max(1, Math.ceil(Math.max(Math.hypot(ux, uy, uz), Math.hypot(wx, wy, wz), Math.hypot(wx - ux, wy - uy, wz - uz)) / step)), ns = Math.max(1, Math.ceil(it.mm / step));
+        for (let i = 0; i <= k; i++) for (let j = 0; j <= k - i; j++) {
+          const s = i / k, r = j / k, px = t[q] + ux * s + wx * r, py = t[q + 1] + uy * s + wy * r, pz = t[q + 2] + uz * s + wz * r;
+          for (let n = 0; n <= ns; n++) { const d = (it.mm * n) / ns + h * 0.3; cell(px + nxx * d, py + nyy * d, pz + nzz * d); }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// The tool start is never touched (plate cylinder), and nothing grows below it (Robot Avoidance cylinder).
+function keepOutMask(k, nx, ny, nz, org, h) {
+  const out = new Uint8Array(nx * ny * nz), r2 = k.R * k.R, rr2 = k.robotR * k.robotR;
+  for (let z = 0; z < nz; z++) {
+    const cz = org[2] + (z + 0.5) * h, lock = cz >= k.zMin && cz <= k.zTop, rob = cz < k.zMin; if (!lock && !rob) continue;
+    const lim = lock ? r2 : rr2;
+    for (let y = 0; y < ny; y++) { const cy = org[1] + (y + 0.5) * h; for (let x = 0; x < nx; x++) { const cx = org[0] + (x + 0.5) * h; if (cx * cx + cy * cy <= lim) out[x + nx * (y + ny * z)] = 1; } }
+  }
+  return out;
+}
+
 let state = null, running = false, stopFlag = false;
 const GDIR = { "-X": [-1, 0, 0], "+X": [1, 0, 0], "-Y": [0, -1, 0], "+Y": [0, 1, 0], "-Z": [0, 0, -1], "+Z": [0, 0, 1] };
 
@@ -125,19 +168,22 @@ function compute(m) {
     if (best < 1) throw new Error("The tool start and the picked faces touch or overlap. Move the tool end away from the tool start.");
     const thr = best * (1 + m.band);
     const kS = voxelizeSolid(m.startAll, nx, ny, nz, org, h), kE = voxelizeSolid(m.endAll, nx, ny, nz, org, h);
-    const free = new Uint8Array(N), vis = new Uint8Array(N), uni = new Uint8Array(N);
-    let count = 0, nA = 0, nB = 0, nFree = 0;
+    const free = new Uint8Array(N), vis = new Uint8Array(N), uni = new Uint8Array(N), lost = new Uint8Array(N), av = m.avoid?.length ? avoidMask(m.avoid, nx, ny, nz, org, h) : null, ko = m.keepOut ? keepOutMask(m.keepOut, nx, ny, nz, org, h) : null;
+    let count = 0, nA = 0, nB = 0, nFree = 0, nAvoided = 0, avoidHitsSrc = false;
     for (let c = 0; c < N; c++) {
       if (srcA[c]) nA++; if (srcB[c]) nB++;
-      if (srcA[c] || srcB[c]) { uni[c] = 1; vis[c] = 1; count++; }
-      else if (!kS[c] && !kE[c] && Math.sqrt(fA[c]) + Math.sqrt(fB[c]) <= thr) { free[c] = 1; vis[c] = 1; count++; nFree++; }
+      if (srcA[c] || srcB[c]) { uni[c] = 1; vis[c] = 1; count++; if (av && av[c]) avoidHitsSrc = true; }
+      else if (!kS[c] && !kE[c] && Math.sqrt(fA[c]) + Math.sqrt(fB[c]) <= thr) {
+        if ((av && av[c]) || (ko && ko[c])) { lost[c] = 1; nAvoided++; continue; } // red: no voxel may grow here
+        free[c] = 1; vis[c] = 1; count++; nFree++;
+      }
     }
-    if (!connected(vis, srcA, srcB, nx, ny, nz)) throw new Error("The tool start or tool end blocks the way between the surfaces. Increase the design space size.");
+    if (!connected(vis, srcA, srcB, nx, ny, nz)) throw new Error("The tool start, the tool end or a red zone (including Robot Avoidance) blocks the way between the surfaces. Make the red zones smaller (for example a lower robot offset) or increase the design space size.");
     if (count > m.budget * 1.1 && !retried) { retried = true; h *= Math.cbrt(count / m.budget) * 1.02; continue; }
     state = { nx, ny, nz, h, org, srcA, srcB, free, cog };
     return {
-      stats: { h, dim, count, nFree, L: best * h, nA, nB, overBudget: count > m.budget * 1.1 },
-      dom: exposed(vis, nx, ny, nz, h, org), src: exposed(uni, nx, ny, nz, h, org),
+      stats: { h, dim, count, nFree, L: best * h, nA, nB, nAvoided, avoidHitsSrc, overBudget: count > m.budget * 1.1 },
+      dom: exposed(vis, nx, ny, nz, h, org), src: exposed(uni, nx, ny, nz, h, org), avoid: exposed(lost, nx, ny, nz, h, org),
     };
   }
 }
@@ -186,8 +232,8 @@ onmessage = async (e) => {
   if (m.type === "domain") {
     try {
       const r = compute(m);
-      postMessage({ type: "domain", id: m.id, ok: true, stats: r.stats, dom: r.dom, src: r.src },
-        [r.dom.p.buffer, r.dom.n.buffer, r.dom.i.buffer, r.src.p.buffer, r.src.n.buffer, r.src.i.buffer]);
+      postMessage({ type: "domain", id: m.id, ok: true, stats: r.stats, dom: r.dom, src: r.src, avoid: r.avoid },
+        [r.dom.p.buffer, r.dom.n.buffer, r.dom.i.buffer, r.src.p.buffer, r.src.n.buffer, r.src.i.buffer, r.avoid.p.buffer, r.avoid.n.buffer, r.avoid.i.buffer]);
     } catch (err) { postMessage({ type: "domain", id: m.id, ok: false, error: err.message }); }
   } else if (m.type === "optimize") {
     running = true; stopFlag = false;
