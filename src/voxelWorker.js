@@ -133,7 +133,47 @@ function keepOutMask(k, nx, ny, nz, org, h) {
     const lim = lock ? r2 : rr2;
     for (let y = 0; y < ny; y++) { const cy = org[1] + (y + 0.5) * h; for (let x = 0; x < nx; x++) { const cx = org[0] + (x + 0.5) * h; if (cx * cx + cy * cy <= lim) out[x + nx * (y + ny * z)] = 1; } }
   }
+  for (const b of k.bolts || []) { // Bolt Clearance: a cylinder above every screw head and the dowel hole
+    for (let z = 0; z < nz; z++) {
+      const cz = org[2] + (z + 0.5) * h; if (cz < b.z0 || cz > b.z1) continue;
+      for (let y = 0; y < ny; y++) { const dy = org[1] + (y + 0.5) * h - b.y; for (let x = 0; x < nx; x++) { const dx = org[0] + (x + 0.5) * h - b.x; if (dx * dx + dy * dy <= b.r * b.r) out[x + nx * (y + ny * z)] = 1; } }
+    }
+  }
   return out;
+}
+
+// Clearance zones: every red item with its own gap (mm grow / mm out), plus the tool start, Robot Avoidance and Bolt Clearance.
+// "ring" = the cells the gaps add around the items (the ghost shell).
+function clearZones() {
+  const S = state, { nx, ny, nz, h, org } = S, N = nx * ny * nz, blocked = new Uint8Array(N), ring = new Uint8Array(N);
+  for (let c = 0; c < N; c++) if (S.fixed[c]) blocked[c] = 1;
+  for (const it of S.avoid) {
+    const zone = avoidMask([it], nx, ny, nz, org, h), base = it.mm > 0 ? avoidMask([{ ...it, mm: 0 }], nx, ny, nz, org, h) : zone;
+    for (let c = 0; c < N; c++) if (zone[c]) { blocked[c] = 1; if (!base[c]) ring[c] = 1; }
+  }
+  return { blocked, ring };
+}
+
+// Deletes result voxels inside the zones (connect surfaces are kept), then drops pieces no longer attached to a connect surface.
+function clearance() {
+  const S = state, { nx, ny, nz, h, org } = S, N = nx * ny * nz;
+  if (!S.result) throw new Error("Generate a design first.");
+  const { blocked } = clearZones(), mask = new Uint8Array(N);
+  let before = 0, cut = 0;
+  for (let c = 0; c < N; c++) if (S.active[c] && S.result[c] > 0.5) { before++; if (blocked[c] && !S.srcA[c] && !S.srcB[c]) cut++; else mask[c] = 1; }
+  const seen = new Uint8Array(N), queue = new Int32Array(N); let qh = 0, qt = 0, reachedB = false;
+  for (let c = 0; c < N; c++) if (mask[c] && (S.srcA[c] || S.srcB[c])) { seen[c] = 1; queue[qt++] = c; }
+  while (qh < qt) {
+    const c = queue[qh++], x = c % nx, y = Math.floor(c / nx) % ny, z = Math.floor(c / (nx * ny));
+    if (S.srcB[c]) reachedB = true;
+    for (let d = 0; d < 6; d++) {
+      const X = x + D[d][0], Y = y + D[d][1], Z = z + D[d][2]; if (X < 0 || Y < 0 || Z < 0 || X >= nx || Y >= ny || Z >= nz) continue;
+      const n = X + nx * (Y + ny * Z); if (!seen[n] && mask[n]) { seen[n] = 1; queue[qt++] = n; }
+    }
+  }
+  let islands = 0; for (let c = 0; c < N; c++) if (mask[c] && !seen[c]) { mask[c] = 0; islands++; }
+  const connectedAB = reachedB;
+  return { mesh: exposed(mask, nx, ny, nz, h, org), stats: { before, cut, islands, after: before - cut - islands, connected: connectedAB } };
 }
 
 let state = null, running = false, stopFlag = false;
@@ -141,7 +181,9 @@ const GDIR = { "-X": [-1, 0, 0], "+X": [1, 0, 0], "-Y": [0, -1, 0], "+Y": [0, 1,
 
 function compute(m) {
   let h = m.h;
-  const A = samplePoints(m.startTris, h, m.R), B = samplePoints(m.endTris, h, null);
+  let A = samplePoints(m.startTris, h, m.R); const bo = m.keepOut?.bolts;
+  if (bo) { const keep = []; for (let i = 0; i < A.length; i += 3) if (!bo.some((b) => A[i + 2] >= b.z0 - h && A[i + 2] <= b.z1 && Math.hypot(A[i] - b.x, A[i + 1] - b.y) <= b.r)) keep.push(A[i], A[i + 1], A[i + 2]); A = keep; }
+  const B = samplePoints(m.endTris, h, null);
   if (!A.length) throw new Error("The tool start has no connect surface here. Try 'Entire top surface'.");
   if (!B.length) throw new Error("No tool end face selected.");
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], ca = [0, 0, 0], cb = [0, 0, 0];
@@ -180,7 +222,8 @@ function compute(m) {
     }
     if (!connected(vis, srcA, srcB, nx, ny, nz)) throw new Error("The tool start, the tool end or a red zone (including Robot Avoidance) blocks the way between the surfaces. Make the red zones smaller (for example a lower robot offset) or increase the design space size.");
     if (count > m.budget * 1.1 && !retried) { retried = true; h *= Math.cbrt(count / m.budget) * 1.02; continue; }
-    state = { nx, ny, nz, h, org, srcA, srcB, free, cog };
+    const fixed = new Uint8Array(N); for (let c = 0; c < N; c++) if (kS[c] || (ko && ko[c])) fixed[c] = 1;
+    state = { nx, ny, nz, h, org, srcA, srcB, free, cog, fixed, avoid: m.avoid || [] };
     return {
       stats: { h, dim, count, nFree, L: best * h, nA, nB, nAvoided, avoidHitsSrc, overBudget: count > m.budget * 1.1 },
       dom: exposed(vis, nx, ny, nz, h, org), src: exposed(uni, nx, ny, nz, h, org), avoid: exposed(lost, nx, ny, nz, h, org),
@@ -218,7 +261,7 @@ async function runOptimize(m) {
     postMessage(msg, msg.mesh ? bufs(msg.mesh) : []);
     await new Promise((r) => setTimeout(r, 0)); // lets a Stop message arrive
   }, () => stopFlag);
-  S.result = res.rho;
+  S.result = res.rho; S.active = active;
   const mesh = meshOf(res.rho);
   postMessage({ type: "done", id: m.id, ok: true, it: res.it, c: res.c, c0: res.c0, vol: res.vol, stopped: res.stopped, converged: res.converged, elapsed: performance.now() - t0, mesh }, bufs(mesh));
 }
@@ -229,6 +272,16 @@ onmessage = async (e) => {
   if (running) { if (m.type === "domain") postMessage({ type: "domain", id: m.id, ok: false, error: "A design is running. Press Stop first." }); return; }
   if (m.type === "bench") return postMessage({ type: "bench", secPerElem: bench() });
   if (m.type === "selftest") return postMessage({ type: "selftest", results: selfTest() });
+  if (m.type === "clearPreview") {
+    if (!state) return;
+    try { const r = clearZones(), mesh = exposed(r.ring, state.nx, state.ny, state.nz, state.h, state.org); postMessage({ type: "clearPreview", id: m.id, mesh }, [mesh.p.buffer, mesh.n.buffer, mesh.i.buffer]); } catch (err) { /* preview only */ }
+    return;
+  }
+  if (m.type === "clear") {
+    try { const r = clearance(); postMessage({ type: "cleared", id: m.id, ok: true, stats: r.stats, mesh: r.mesh }, [r.mesh.p.buffer, r.mesh.n.buffer, r.mesh.i.buffer]); }
+    catch (err) { postMessage({ type: "cleared", id: m.id, ok: false, error: err.message }); }
+    return;
+  }
   if (m.type === "domain") {
     try {
       const r = compute(m);
