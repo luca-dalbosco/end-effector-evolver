@@ -130,7 +130,7 @@ function avoidMask(items, nx, ny, nz, org, h) {
 // Print-ready: the first layer whose cell centres are on or above the bed (the tool start top face). Everything below it is blocked.
 const bedLayer = (k, org, h) => Math.ceil((k.zTop - org[2]) / h - 0.5);
 
-// Bolt Clearance is a slot: head diameter wide, from the bolt straight outward (away from the flange centre) for b.len mm.
+// Bolt Clearance is a slot: head diameter wide, from the bolt straight outward (away from the flange centre) for b.len mm (0 = cylinder).
 // Distance in XY from a point to the slot centre line.
 function slotDist(b, x, y) {
   const l = Math.hypot(b.x, b.y), ux = l > 1e-9 ? b.x / l : 0, uy = l > 1e-9 ? b.y / l : 0;
