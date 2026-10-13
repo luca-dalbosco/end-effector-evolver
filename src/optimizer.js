@@ -3,9 +3,11 @@
 import { createFem } from "./fem.js";
 
 // P: nx, ny, nz, active (1 = element exists), passive (1 = fixed solid), fixedMask, force, vf (material fraction), rmin (filter radius in voxels), maxIter.
+// Refine only: x0 = start density per element (instead of vf). shrink = {tol, step, minFrac}: once the design settles, the material cap is lowered
+// by "step" while the stiffness stays within "tol" of the start design (compliance of the first step), down to minFrac of the first cap.
 // onStep(info) may be async (lets the worker receive Stop). shouldStop() -> true to stop.
 export async function optimize(P, onStep, shouldStop) {
-  const { nx, ny, nz, active, passive, fixedMask, force, vf, rmin, maxIter } = P;
+  const { nx, ny, nz, active, passive, fixedMask, force, vf, rmin, maxIter, x0, shrink } = P;
   const p = 3, Emin = 1e-3, move = 0.3, nel = nx * ny * nz;
   const fem = createFem({ nx, ny, nz, active, Emin, p });
   fem.setFixed(fixedMask);
@@ -36,13 +38,14 @@ export async function optimize(P, onStep, shouldStop) {
   }
 
   const x = new Float64Array(nel), rho = new Float64Array(nel);
-  for (let e = 0; e < nel; e++) x[e] = passive[e] ? 1 : active[e] ? vf : 0;
+  for (let e = 0; e < nel; e++) x[e] = passive[e] ? 1 : active[e] ? (x0 ? x0[e] : vf) : 0;
   const filter = () => {
     rho.set(x);
     for (let r = 0; r < nFree; r++) { let s = 0; for (let o = rowStart[r]; o < rowStart[r + 1]; o++) s += w[o] * x[cols[o]]; rho[list[r]] = s / sRow[r]; }
   };
   const u = new Float64Array(fem.ndof), ue = new Float64Array(nel), dc = new Float64Array(nFree), dcdx = new Float64Array(nFree), xn = new Float64Array(nFree);
-  const Vt = vf * nFree;
+  const Vcap = vf * nFree;
+  let Vt = Vcap, cRef = null, accepted = null, accC = 0, accVol = 0, since = 0;
   let c0 = null, c = 0, steps = 0, change = 1, vol = vf, stopped = false, converged = false;
   filter();
   for (let it = 1; it <= maxIter; it++) {
@@ -51,7 +54,7 @@ export async function optimize(P, onStep, shouldStop) {
     const s = fem.solve(force, u, it === 1 ? 1e-4 : 1e-3, it === 1 ? 500 : 60);
     fem.unitEnergy(u, ue);
     c = 0; for (let d = 0; d < fem.ndof; d++) c += force[d] * u[d];
-    if (c0 === null) c0 = c;
+    if (c0 === null) c0 = cRef = c;
     for (let r = 0; r < nFree; r++) { const e = list[r]; dc[r] = -p * (1 - Emin) * Math.pow(rho[e], p - 1) * ue[e]; }
     dcdx.fill(0);
     for (let r = 0; r < nFree; r++) for (let o = rowStart[r]; o < rowStart[r + 1]; o++) { const fr = rowOf[cols[o]]; if (fr >= 0) dcdx[fr] += (w[o] / sRow[r]) * dc[r]; }
@@ -68,7 +71,35 @@ export async function optimize(P, onStep, shouldStop) {
     vol = vConst; for (let r = 0; r < nFree; r++) vol += dv[r] * x[list[r]]; vol /= nFree;
     filter(); steps = it;
     await onStep({ it, maxIter, c, c0, vol, change, cg: s.iters, rho });
-    if (change < 0.02 && it >= 12) { converged = true; break; }
+    since++;
+    if (change < 0.02 && it >= 12 && (!shrink || since >= 8)) {
+      if (shrink && c <= cRef * (1 + shrink.tol) && Vt * (1 - shrink.step) >= Vcap * shrink.minFrac) {
+        accepted = Float64Array.from(x); accC = c; accVol = vol; Vt *= 1 - shrink.step; since = 0; continue;
+      }
+      converged = true; break;
+    }
   }
-  return { rho, c, c0: c0 ?? c, vol, it: steps, stopped, converged };
+  if (shrink && accepted && c > cRef * (1 + shrink.tol)) { x.set(accepted); filter(); c = accC; vol = accVol; } // the last shrink cost too much stiffness: go back
+  return { rho, c, c0: c0 ?? c, cRef: cRef ?? c, vol, it: steps, stopped, converged };
+}
+// Refine self-test: a small cantilever is optimized, then re-run from its own result with the shrink rule.
+// Checks: the material never goes above the cap, and the stiffness stays within the tolerance of the start design.
+export async function refineSelfTest(tol, step, minFrac) {
+  const nx = 16, ny = 5, nz = 5, nel = nx * ny * nz, sx = nx + 1, sy = ny + 1, nn = sx * sy * (nz + 1);
+  const fixedMask = new Uint8Array(3 * nn), force = new Float64Array(3 * nn);
+  for (let j = 0; j <= ny; j++) for (let k = 0; k <= nz; k++) {
+    for (let d = 0; d < 3; d++) fixedMask[3 * (0 + sx * (j + sy * k)) + d] = 1;
+    force[3 * (nx + sx * (j + sy * k)) + 2] = -1 / ((ny + 1) * (nz + 1));
+  }
+  const base = { nx, ny, nz, active: new Uint8Array(nel).fill(1), passive: new Uint8Array(nel), fixedMask, force, vf: 0.4, rmin: 1.5, maxIter: 80 };
+  const noop = () => {}, never = () => false;
+  const a = await optimize(base, noop, never);
+  const x0 = new Float64Array(nel); for (let e = 0; e < nel; e++) x0[e] = a.rho[e] > 0.5 ? 1 : 0.01;
+  const cap = x0.reduce((s, v) => s + (v === 1 ? 1 : 0), 0) / nel; // as in the app: the cap is the volume of the start design
+  const b = await optimize({ ...base, vf: cap, x0, maxIter: 150, shrink: { tol, step, minFrac } }, noop, never);
+  const lim = b.cRef * (1 + tol);
+  return [
+    { ok: b.vol <= cap + 1e-3, text: `Refine rule: material ${(b.vol * 100).toFixed(1)}% never above the start volume of ${(cap * 100).toFixed(1)}%` },
+    { ok: b.c <= lim * (1 + 1e-6), text: `Refine rule: stiffness ${(b.cRef / b.c).toFixed(2)}× the start design (needs ≥ ${(1 / (1 + tol)).toFixed(2)}×), material cut from ${(cap * 100).toFixed(1)}% to ${(b.vol * 100).toFixed(1)}%` },
+  ];
 }
