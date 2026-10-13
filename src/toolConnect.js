@@ -5,11 +5,11 @@ import { solidCentroid } from "./voxelize.js";
 
 export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, list }) {
   const dom = renderer.domElement;
-  const ADV = { budget: tc.analysisVoxelBudget.default, rmin: tc.filterRadius.default, iters: tc.maxIterations.default, mass: tc.payloadMassKg.default, accel: tc.accelFactor.default, gdir: tc.gravityDirection.default, fx: 0, fy: 0, fz: 0, sp: tc.smooth.passes.default };
+  const ADV = { budget: tc.analysisVoxelBudget.default, rmin: tc.filterRadius.default, iters: tc.maxIterations.default, mass: tc.payloadMassKg.default, accel: tc.accelFactor.default, gdir: tc.gravityDirection.default, fx: 0, fy: 0, fz: 0, sp: tc.smooth.passes.default, bh: tc.bridge.voxelSizeMm.default };
   const vfOf = (id) => tc.strength.options.find((o) => o.id === id).vf;
-  const S = { conn: tc.toolStartConnection.default, h: tc.voxelSize.default, band: tc.designSpace.default, str: tc.strength.default, vf: vfOf(tc.strength.default), print: tc.printReady.default, refineEnd: tc.refineAtEnd.default, bd: tc.bolt.diameterAdjustMm.default, bl: tc.bolt.lengthAdjustMm.default, bshape: tc.bolt.shape.default, bslot: tc.bolt.slotLengthMm.default, ...ADV };
+  const S = { conn: tc.toolStartConnection.default, h: tc.voxelSize.default, band: tc.designSpace.default, str: tc.strength.default, vf: vfOf(tc.strength.default), print: tc.printReady.default, refineEnd: tc.refineAtEnd.default, bd: tc.bolt.diameterAdjustMm.default, bl: tc.bolt.lengthAdjustMm.default, bshape: tc.bolt.shape.default, bslot: tc.bolt.slotLengthMm.default, method: tc.method.default, waist: tc.bridge.waistPercent.default, ...ADV };
   let advanced = false, active = false, running = false, worker = null, reqId = 0, optId = 0, timer = null, secPerElem = null, lastStats = null, tStart = 0;
-  let chain = false, sag = null, arrow = null, cog = null; // chain: Generate runs optimize → clearance → refine in one go
+  let bridged = false, chain = false, sag = null, arrow = null, cog = null; // chain: Generate runs optimize → clearance → refine in one go
   let curPart = null, hl = null, prev = [], result = null, ghost = null, gid = 0, canClear = false, refined = false, coarseGhost = null, predGen = null, predRef = null;
   // time estimate = measured matrix speed × work × a factor; the factor is learned from the last finished run on this computer
   const calib = { gen: 1, ref: 1 };
@@ -32,10 +32,15 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const advL = document.createElement("label"), advC = Object.assign(document.createElement("input"), { type: "checkbox" });
   advC.onchange = () => {
     advanced = advC.checked;
-    if (!advanced) { S.vf = vfOf(S.str); S.h = clamp(S.h, tc.voxelSize); S.band = clamp(S.band, tc.designSpace); Object.assign(S, ADV); avoid.forEach((en) => (en.mm = clamp(en.mm, cfgOf(en)))); robot.mm = clamp(robot.mm, tc.avoid.robotOffsetMm); S.bd = clamp(S.bd, tc.bolt.diameterAdjustMm); S.bl = clamp(S.bl, tc.bolt.lengthAdjustMm); S.bslot = clamp(S.bslot, tc.bolt.slotLengthMm); drawRobot(); renderAvoid(); }
+    if (!advanced) { S.vf = vfOf(S.str); S.h = clamp(S.h, tc.voxelSize); S.band = clamp(S.band, tc.designSpace); Object.assign(S, ADV); avoid.forEach((en) => (en.mm = clamp(en.mm, cfgOf(en)))); robot.mm = clamp(robot.mm, tc.avoid.robotOffsetMm); S.bd = clamp(S.bd, tc.bolt.diameterAdjustMm); S.bl = clamp(S.bl, tc.bolt.lengthAdjustMm); S.bslot = clamp(S.bslot, tc.bolt.slotLengthMm); S.waist = clamp(S.waist, tc.bridge.waistPercent); drawRobot(); renderAvoid(); }
     sync(); schedule();
   };
   advL.append(advC, " Advanced mode (type any value)"); panel.append(advL);
+  const group = (from) => { const w = document.createElement("div"); w.append(...[...panel.children].slice(from)); panel.append(w); return w; }; // wraps what was added since `from`, to show or hide it per method
+  const mRow = document.createElement("div"); mRow.className = "row"; mRow.innerHTML = "<label>Method</label>";
+  const mSel = document.createElement("select"); tc.method.options.forEach((o) => mSel.add(new Option(o.label, o.id)));
+  mSel.onchange = () => { S.method = mSel.value; refined = false; refOut.textContent = ""; clearCoarseGhost(); clearPrev(); clearResult(); lastStats = null; setInfo("", ""); sync(); run(); };
+  mRow.append(mSel); panel.append(mRow);
 
   head("Tool start surface");
   const sel = document.createElement("select");
@@ -144,6 +149,12 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     d.append(l, r, n, note); panel.append(d);
     refreshers.push(() => { r.value = n.value = S[key]; d.style.display = hidden() ? "none" : ""; n.className = rec ? (S[key] >= rec[0] && S[key] <= rec[1] ? "ok" : "warn") : ""; });
   }
+  head("Print");
+  const prL = document.createElement("label"), prC = Object.assign(document.createElement("input"), { type: "checkbox" }), prNote = document.createElement("div");
+  prC.onchange = () => { S.print = prC.checked; schedule(); };
+  prL.append(prC, " Print-ready (test): flange face on the bed, 45° overhangs, no supports"); prNote.className = "rec"; prNote.textContent = tc.printReady.note;
+  panel.append(prL, prNote);
+  const fromOpt = panel.children.length;
   head("Voxels");
   numRow("Design space size", tc.designSpace, "band");
   numRow("Max analysis voxels", tc.analysisVoxelBudget, "budget", () => !advanced);
@@ -158,10 +169,6 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   stSel.onchange = () => { S.str = stSel.value; S.vf = vfOf(S.str); sync(); };
   stRow.append(stSel); panel.append(stRow);
   numRow("Material share of the design space", tc.volumeFraction, "vf", () => !advanced, false);
-  const prL = document.createElement("label"), prC = Object.assign(document.createElement("input"), { type: "checkbox" }), prNote = document.createElement("div");
-  prC.onchange = () => { S.print = prC.checked; schedule(); };
-  prL.append(prC, " Print-ready (test): flange face on the bed, 45° overhangs, no supports"); prNote.className = "rec"; prNote.textContent = tc.printReady.note;
-  panel.append(prL, prNote);
   numRow("Filter radius (voxels)", tc.filterRadius, "rmin", () => !advanced);
   numRow("Max steps", tc.maxIterations, "iters", () => !advanced);
   head("Load");
@@ -183,7 +190,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     const L = tc.arrowLengthMm, dir = new THREE.Vector3(F[0] / n, F[1] / n, F[2] / n);
     arrow = new THREE.ArrowHelper(dir, new THREE.Vector3(...cog).addScaledVector(dir, -L), L, 0xffd600, L * 0.25, L * 0.12);
     arrow.traverse((o) => { o.raycast = () => {}; o.renderOrder = 999; if (o.material) o.material.depthTest = false; }); // drawn on top, also inside the part
-    arrow.visible = active; scene.add(arrow);
+    arrow.visible = active && S.method === "optimize"; scene.add(arrow);
   }
   refreshers.push(() => {
     const n = Math.hypot(...forceVec());
@@ -191,9 +198,19 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     drawArrow();
   });
 
+  const optA = group(fromOpt);
   const info = document.createElement("div"); info.style.cssText = "font-size:12px;margin:10px 0;line-height:1.5"; panel.append(info);
   const setInfo = (cls, html) => { info.className = cls; info.innerHTML = html; };
 
+  const fromBr = panel.children.length;
+  head("Bridge");
+  const brNote = document.createElement("div"); brNote.className = "rec";
+  brNote.textContent = "Instant: a solid wrap from the flange top to the green faces, narrower in the middle, minus the red zones, the tool start, Robot Avoidance and Bolt Clearance. It updates by itself after every change.";
+  panel.append(brNote);
+  numRow("Waist (% narrower in the middle)", tc.bridge.waistPercent, "waist");
+  numRow("Bridge voxel size (mm)", tc.bridge.voxelSizeMm, "bh", () => !advanced);
+  const brOut = document.createElement("div"); brOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px"; panel.append(brOut);
+  const brG = group(fromBr), fromOpt2 = panel.children.length;
   head("Generate");
   const genNote = document.createElement("div"); genNote.className = "rec";
   genNote.textContent = "One click: designs the connector, clears the red zones, the tool start, Robot Avoidance and Bolt Clearance (orange ghost = the gap around red items), drops loose pieces, then refines on the finer voxel if ticked.";
@@ -249,13 +266,15 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   cutNote.textContent = "Last step: cuts the clearance zones out of the final shape, like a boolean difference. Connect surfaces are never cut. Use it after smoothing, or after changing a gap.";
   const bCut = btn("Cut clearance", () => smSend({ type: "smoothClear" }, "Cutting…"));
   panel.append(cutNote, bCut);
+  const optB = group(fromOpt2);
+  refreshers.push(() => { mSel.value = S.method; optA.style.display = optB.style.display = S.method === "optimize" ? "" : "none"; brG.style.display = S.method === "bridge" ? "" : "none"; });
   head("Export");
   const bStl = btn("Download STL", () => downloadStl());
-  const exNote = document.createElement("div"); exNote.className = "rec"; exNote.textContent = "Exports what you see (voxels or smoothed), in mm, in the robot flange position. Place the flange face on the bed.";
+  const exNote = document.createElement("div"); exNote.className = "rec"; exNote.textContent = "Exports what you see (bridge, voxels or smoothed), in mm, in the robot flange position. Place the flange face on the bed.";
   panel.append(bStl, exNote);
   refreshers.push(() => {
     bSmooth.disabled = bCut.disabled = bUnsmooth.disabled = running || !canClear;
-    bStl.disabled = running || !result || !canClear;
+    bStl.disabled = running || !result || !(canClear || bridged);
     const o = tc.smooth.strength.options.find((x) => x.passes === S.sp); if (o) smSel.value = o.id;
   });
   function downloadStl() { // binary STL of the shown result
@@ -408,7 +427,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   function clearPrev() { prev.forEach((m) => { scene.remove(m); m.geometry.dispose(); }); prev = []; clearGhost(); }
   const ghostCoarseMat = new THREE.MeshStandardMaterial({ color: 0x4a7fb5, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide });
   function clearCoarseGhost() { if (coarseGhost) { scene.remove(coarseGhost); coarseGhost.geometry.dispose(); coarseGhost = null; } }
-  function clearResult() { canClear = false; clrOut.textContent = ""; smOut.textContent = ""; vol = sag = over = null; showSummary(); if (result) { scene.remove(result); result.geometry.dispose(); result = null; } }
+  function clearResult() { canClear = bridged = false; clrOut.textContent = ""; smOut.textContent = ""; vol = sag = over = null; showSummary(); if (result) { scene.remove(result); result.geometry.dispose(); result = null; } }
   const ghostMat = new THREE.MeshStandardMaterial({ color: 0xff9800, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide });
   function ghostPreview() { if (worker && lastStats && !running) worker.postMessage({ type: "clearPreview", id: ++gid }); }
   function applyClearance() { if (!worker || !canClear) return; clrOut.textContent = "Clearing…"; worker.postMessage({ type: "clear" }); }
@@ -476,6 +495,16 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
       refOut.innerHTML = `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔" : "⚠ The tool start and the tool end are no longer connected."} Refine ${m.stopped ? "stopped" : "finished"} after ${m.it} steps in ${fmt(m.elapsed)}. Voxel ${m.h.toFixed(2)} mm (analysis was ${m.hc.toFixed(2)} mm).` + (advanced ? `<br>Stiffness: ${(m.c0 / m.c).toFixed(2)}× the coarse design. Material: ${((m.vol / m.cap) * 100).toFixed(0)}% of the coarse volume. ${t.islands.toLocaleString()} loose voxels dropped.` : "") + "</span>";
       return;
     }
+    if (m.type === "bridged") {
+      if (m.id !== reqId) return;
+      if (!m.ok) { clearResult(); brOut.innerHTML = `<span class="bad">✖ ${m.error}</span>`; return; }
+      showResult(m.mesh); bridged = m.mesh.i.length > 0; sync();
+      const t = m.stats; vol = t.volCm3; over = t.overhang; sag = null; showSummary();
+      brOut.innerHTML = `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔ Bridge ready" : "⚠ The keep-outs cut the bridge: the tool start and the tool end are not connected"} in ${(t.ms / 1000).toFixed(1)} s.</span>`
+        + (t.waistCut ? `<br><span class="warn">Print-ready: waist lowered to ${t.waist.toFixed(0)}% so the walls do not overhang more than 45°.</span>` : "")
+        + (advanced ? `<br>Voxel ${t.h.toFixed(2)} mm, ${t.tris.toLocaleString()} triangles, ${t.islands.toLocaleString()} loose cells dropped.` : "");
+      return;
+    }
     if (m.type === "selftest") { selfOut.innerHTML = (m.more ? selfOut.innerHTML : "") + m.results.map((r) => `<div class="${r.ok === null ? "" : r.ok ? "ok" : "bad"}">${r.ok === null ? "ℹ" : r.ok ? "✔" : "✖"} ${r.text}</div>`).join(""); return; }
     if (m.type === "clearPreview") { if (m.id === gid) { clearGhost(); if (m.mesh.i.length) ghost = meshOf(m.mesh, ghostMat); } return; }
     if (m.type === "smoothed") {
@@ -528,11 +557,19 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     if (!curPart) { bGo.disabled = true; cog = null; drawArrow(); return setInfo("warn", "Add a part in step 2 (Tool end) first."); }
     cog = solidCentroid(endTris(true)); drawArrow();
     if (!picked.size) { lastStats = null; bGo.disabled = true; clearPrev(); clearResult(); return setInfo("warn", "Click one or more faces of the tool end to choose where the connector attaches. They turn green."); }
+    if (S.method === "bridge") return runBridge(st);
     ensureWorker(); bGo.disabled = true; drawRobot();
-    const d = st.dims, R = S.conn === "partial" ? (d.spigotOuter ? d.spigotOuter / 2 : d.centreHole / 2 + d.thickness) : null;
+    const R = startR(st.dims);
     const a = startTris(st, false), b = endTris(false), sa = startTris(st, true), ea = endTris(true), av = avoidData(), ko = keepOut();
     setInfo("", "Computing design space…");
     worker.postMessage({ type: "domain", id: ++reqId, h: tc.voxelSize.min, band: S.band, budget: S.budget, maxCells: tc.maxGridCells, R, startTris: a, endTris: b, startAll: sa, endAll: ea, avoid: av.items, keepOut: ko }, [a.buffer, b.buffer, sa.buffer, ea.buffer, ...av.tr]);
+  }
+  const startR = (d) => (S.conn === "partial" ? (d.spigotOuter ? d.spigotOuter / 2 : d.centreHole / 2 + d.thickness) : null);
+  function runBridge(st) {
+    ensureWorker(); drawRobot(); clearPrev(); lastStats = null; setInfo("", "");
+    const b = endTris(false), ea = endTris(true), av = avoidData(), ko = keepOut();
+    brOut.textContent = "Building the bridge…";
+    worker.postMessage({ type: "bridge", id: ++reqId, h: S.bh, waist: S.waist, maxCells: tc.maxGridCells, R: startR(st.dims), endTris: b, endAll: ea, avoid: av.items, keepOut: ko }, [b.buffer, ea.buffer, ...av.tr]);
   }
   function refine() {
     if (!worker || !canRefine()) return;
@@ -551,7 +588,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   }
 
   document.addEventListener("stage", (e) => {
-    active = e.detail === "C"; list.setVis(robotRow, active ? 1 : 2); list.setVis(boltRow, active ? 1 : 2); if (ghost) ghost.visible = active; if (arrow) arrow.visible = active; if (coarseGhost) coarseGhost.visible = active; panel.style.display = active ? "" : "none";
+    active = e.detail === "C"; list.setVis(robotRow, active ? 1 : 2); list.setVis(boltRow, active ? 1 : 2); if (ghost) ghost.visible = active; if (arrow) arrow.visible = active && S.method === "optimize"; if (coarseGhost) coarseGhost.visible = active; panel.style.display = active ? "" : "none";
     prev.forEach((m) => (m.visible = active && !result)); if (result) result.visible = active;
     if (active) renderAvoid();
     if (active && !running) { sync(); run(); }

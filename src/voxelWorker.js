@@ -6,6 +6,7 @@ import { optimize, refineSelfTest, amSelfTest } from "./optimizer.js";
 import tc from "../data/toolConnect.json";
 const tcRefine = Object.fromEntries(Object.entries(tc.refine).map(([k, v]) => [k, v.default]));
 import { voxelizeSolid, connected, solidCentroid, nodalLoads } from "./voxelize.js";
+import { convexHull } from "./hull.js";
 const BIG = 1e9;
 
 // Speed test: seconds per element for one real solver matrix-vector product.
@@ -341,6 +342,134 @@ function refineMasks(r, nx, ny, nz, org, h) {
   return { band, mat };
 }
 
+// ---------- Bridge (Basic mode) ----------
+// Squared distance from a point to a triangle (t: 9 numbers from q). Closest point by the region of the triangle the point projects into.
+function triDist2(x, y, z, t, q) {
+  const ax = t[q], ay = t[q + 1], az = t[q + 2], bx = t[q + 3] - ax, by = t[q + 4] - ay, bz = t[q + 5] - az, cx = t[q + 6] - ax, cy = t[q + 7] - ay, cz = t[q + 8] - az;
+  const px = x - ax, py = y - ay, pz = z - az, d1 = bx * px + by * py + bz * pz, d2 = cx * px + cy * py + cz * pz;
+  let u = 0, v = 0; // closest point = a + u·ab + v·ac
+  if (d1 <= 0 && d2 <= 0) { /* corner a */ } else {
+    const d3 = d1 - (bx * bx + by * by + bz * bz), d4 = d2 - (bx * cx + by * cy + bz * cz); // the same products seen from b
+    const d5 = d1 - (bx * cx + by * cy + bz * cz), d6 = d2 - (cx * cx + cy * cy + cz * cz); // seen from c
+    const vc = d1 * d4 - d3 * d2, vb = d5 * d2 - d1 * d6, va = d3 * d6 - d5 * d4;
+    if (d3 >= 0 && d4 <= d3) u = 1;
+    else if (d6 >= 0 && d5 <= d6) v = 1;
+    else if (vc <= 0 && d1 >= 0 && d3 <= 0) u = d1 / (d1 - d3);
+    else if (vb <= 0 && d2 >= 0 && d6 <= 0) v = d2 / (d2 - d6);
+    else if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) { v = (d4 - d3) / (d4 - d3 + (d5 - d6)); u = 1 - v; }
+    else { const s = 1 / (va + vb + vc); u = vb * s; v = vc * s; }
+  }
+  const ex = px - bx * u - cx * v, ey = py - by * u - cy * v, ez = pz - bz * u - cz * v;
+  return ex * ex + ey * ey + ez * ez;
+}
+
+// Exact distance (mm) from each cell centre to a triangle mesh, only within `band` mm of it (BIG elsewhere).
+function meshBand(tris, nx, ny, nz, org, h, band) {
+  const out = new Float32Array(nx * ny * nz).fill(BIG), b2 = band * band;
+  const rng = (a, b, ax, n) => [Math.max(0, Math.floor((a - band - org[ax]) / h - 0.5)), Math.min(n - 1, Math.ceil((b + band - org[ax]) / h - 0.5))];
+  for (let q = 0; q < tris.length; q += 9) {
+    const [x0, x1] = rng(Math.min(tris[q], tris[q + 3], tris[q + 6]), Math.max(tris[q], tris[q + 3], tris[q + 6]), 0, nx);
+    const [y0, y1] = rng(Math.min(tris[q + 1], tris[q + 4], tris[q + 7]), Math.max(tris[q + 1], tris[q + 4], tris[q + 7]), 1, ny);
+    const [z0, z1] = rng(Math.min(tris[q + 2], tris[q + 5], tris[q + 8]), Math.max(tris[q + 2], tris[q + 5], tris[q + 8]), 2, nz);
+    for (let k = z0; k <= z1; k++) for (let j = y0; j <= y1; j++) for (let i = x0; i <= x1; i++) {
+      const d = triDist2(org[0] + (i + 0.5) * h, org[1] + (j + 0.5) * h, org[2] + (k + 0.5) * h, tris, q), c = i + nx * (j + ny * k);
+      if (d < b2 && d < out[c]) out[c] = d;
+    }
+  }
+  for (let c = 0; c < out.length; c++) if (out[c] < BIG) out[c] = Math.sqrt(out[c]);
+  return out;
+}
+
+// Solid wrap: convex hull of the flange disc and the picked faces, narrowed in the middle (waist), minus the keep-outs.
+// Everything is one signed distance (mm, negative inside), drawn with surface nets. No optimization, no FEM.
+function bridge(m) {
+  const t0 = performance.now(), k = m.keepOut, zTop = k.zTop, RA = m.R ?? k.R, cfg = tc.bridge, E = m.endTris, pts = [];
+  for (let i = 0; i < cfg.circleSegments; i++) { const a = (2 * Math.PI * i) / cfg.circleSegments; pts.push(RA * Math.cos(a), RA * Math.sin(a), zTop); }
+  const cB = [0, 0, 0], nS = [0, 0, 0]; let area = 0;
+  for (let q = 0; q < E.length; q += 9) { // area-weighted centre and normal of the picked faces
+    const ux = E[q + 3] - E[q], uy = E[q + 4] - E[q + 1], uz = E[q + 5] - E[q + 2], wx = E[q + 6] - E[q], wy = E[q + 7] - E[q + 1], wz = E[q + 8] - E[q + 2];
+    const cr = [uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx], A = Math.hypot(...cr);
+    area += A; for (let a = 0; a < 3; a++) { cB[a] += (A * (E[q + a] + E[q + 3 + a] + E[q + 6 + a])) / 3; nS[a] += cr[a]; }
+    for (let i = 0; i < 9; i++) pts.push(E[q + i]);
+  }
+  if (!(area > 0)) throw new Error("No tool end face selected.");
+  for (let a = 0; a < 3; a++) cB[a] /= area;
+  const cA = [0, 0, zTop], ax = [cB[0], cB[1], cB[2] - zTop], L = Math.hypot(...ax);
+  if (L < 1e-3) throw new Error("The picked faces sit on the flange centre. Move the tool end away from the tool start.");
+  const u = ax.map((v) => v / L), nl = Math.hypot(...nS);
+  const pn = nl > 0.3 * area ? nS.map((v) => v / nl) : u.map((v) => -v); // plane of the picked faces (or across the axis if they face many ways)
+  const sg = pn[0] * (cA[0] - cB[0]) + pn[1] * (cA[1] - cB[1]) + pn[2] * (cA[2] - cB[2]) >= 0 ? 1 : -1;
+  const planes = convexHull(pts), np = planes.length;
+  const hullSd = (x, y, z, cut) => { let s = -Infinity; for (let i = 0; i < np; i += 4) { const v = planes[i] * x + planes[i + 1] * y + planes[i + 2] * z - planes[i + 3]; if (v > s) { s = v; if (s > cut) return s; } } return s; };
+  // waist: s = 0 on the flange face, 1 on the picked faces' plane; the cross-section across the axis is scaled by w(s) = 1 − W·4s(1−s)
+  const shape = (x, y, z, W, cut) => {
+    if (W <= 0) return hullSd(x, y, z, cut);
+    const dA = Math.max(0, z - zTop), dB = Math.max(0, sg * (pn[0] * (x - cB[0]) + pn[1] * (y - cB[1]) + pn[2] * (z - cB[2]))), s = dA + dB > 1e-9 ? dA / (dA + dB) : 0;
+    const w = 1 - W * 4 * s * (1 - s), rx = x - ax[0] * s, ry = y - ax[1] * s, rz = z - zTop - ax[2] * s, ru = rx * u[0] + ry * u[1] + rz * u[2], f = 1 / w - 1;
+    return hullSd(x + (rx - ru * u[0]) * f, y + (ry - ru * u[1]) * f, z + (rz - ru * u[2]) * f, cut / w) * w;
+  };
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < pts.length; i += 3) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], pts[i + a]); hi[a] = Math.max(hi[a], pts[i + a]); }
+  const grid = (h, maxCells) => {
+    h = Math.max(h, Math.cbrt(hi.reduce((p, v, a) => p * (v - lo[a] + 6 * h), 1) / maxCells));
+    const org = lo.map((v) => v - 3 * h), dim = hi.map((v, a) => Math.ceil((v + 3 * h - org[a]) / h) + 1);
+    return { h, org, nx: dim[0], ny: dim[1], nz: dim[2], N: dim[0] * dim[1] * dim[2] };
+  };
+  const fill = (g, W, cut) => { const sd = new Float32Array(g.N); for (let z = 0, c = 0; z < g.nz; z++) for (let y = 0; y < g.ny; y++) for (let x = 0; x < g.nx; x++, c++) sd[c] = shape(g.org[0] + (x + 0.5) * g.h, g.org[1] + (y + 0.5) * g.h, g.org[2] + (z + 0.5) * g.h, W, cut); return sd; };
+  // print-ready: lower the waist until the wrap overhangs no more than the straight wrap (45° rule, on a coarse grid)
+  let W = Math.max(0, m.waist) / 100;
+  if (k.bed && W > 0) {
+    const g = grid(2 * m.h, cfg.printCheckCells), zero = new Uint8Array(g.N), G = { ...g, srcA: zero, srcB: zero, input: { keepOut: k } };
+    const over = (w) => { const sd = fill(g, w, 0), mk = new Uint8Array(g.N); for (let c = 0; c < g.N; c++) if (sd[c] < 0) mk[c] = 1; return overhangs(mk, G); };
+    const base = over(0);
+    if (over(W) > base) { let a = 0, b = W; for (let i = 0; i < cfg.printWaistSteps; i++) { const mid = (a + b) / 2; if (over(mid) > base) b = mid; else a = mid; } W = a; }
+  }
+  const g = grid(m.h, m.maxCells), { h, org, nx, ny, nz, N } = g, sd = fill(g, W, 2 * h);
+  // keep-outs, all analytic: tool start plate, Robot Avoidance, Bolt Clearance slots, bed
+  for (let z = 0, c = 0; z < nz; z++) { const cz = org[2] + (z + 0.5) * h;
+    for (let y = 0; y < ny; y++) { const cy = org[1] + (y + 0.5) * h;
+      for (let x = 0; x < nx; x++, c++) {
+        if (sd[c] > 2 * h) continue;
+        const cx = org[0] + (x + 0.5) * h, r = Math.hypot(cx, cy);
+        let kk = Math.min(Math.max(r - k.R, cz - zTop, k.zMin - cz), Math.max(r - k.robotR, cz - k.zMin));
+        for (const b of k.bolts || []) kk = Math.min(kk, Math.max(slotDist(b, cx, cy) - b.r, b.z0 - cz, cz - b.z1));
+        if (k.bed) kk = Math.min(kk, cz - zTop);
+        if (-kk > sd[c]) sd[c] = -kk;
+      } } }
+  // the tool end: exact distance near its surface, sign from the voxelized solid
+  const inE = voxelizeSolid(m.endAll, nx, ny, nz, org, h), dE = meshBand(m.endAll, nx, ny, nz, org, h, 2 * h);
+  for (let c = 0; c < N; c++) { const e = inE[c] ? dE[c] : -dE[c]; if (e > sd[c]) sd[c] = e; }
+  if (m.avoid?.length) { // red items: signed distance to their zones (voxel accurate, a little rounded, as in Final cut)
+    const bl = avoidMask(m.avoid, nx, ny, nz, org, h), out = new Float32Array(N), inn = new Float32Array(N);
+    for (let c = 0; c < N; c++) { out[c] = bl[c] ? 0 : BIG; inn[c] = bl[c] ? BIG : 0; }
+    edt(out, nx, ny, nz); edt(inn, nx, ny, nz);
+    const d = new Float32Array(N); for (let c = 0; c < N; c++) d[c] = bl[c] ? -(Math.sqrt(inn[c]) - 0.5) : Math.sqrt(out[c]) - 0.5;
+    blur3(d, nx, ny, nz, true); blur3(d, nx, ny, nz, true);
+    for (let c = 0; c < N; c++) if (-d[c] * h > sd[c]) sd[c] = -d[c] * h;
+  }
+  // connection check: the first layer on the flange face (A) and the cells on the picked faces (B)
+  const mask = new Uint8Array(N), srcA = new Uint8Array(N), srcB = new Uint8Array(N);
+  for (let c = 0; c < N; c++) if (sd[c] < 0) mask[c] = 1;
+  const kA = Math.floor((zTop - org[2]) / h + 0.5); // first layer with its centre above the flange face
+  if (kA >= 0 && kA < nz) for (let c = nx * ny * kA; c < nx * ny * (kA + 1); c++) if (mask[c]) srcA[c] = 1;
+  const B = samplePoints(E, h, null);
+  for (let i = 0; i < B.length; i += 3) {
+    const x = Math.floor((B[i] - org[0]) / h), y = Math.floor((B[i + 1] - org[1]) / h), z = Math.floor((B[i + 2] - org[2]) / h);
+    if (x >= 0 && y >= 0 && z >= 0 && x < nx && y < ny && z < nz && mask[x + nx * (y + ny * z)]) srcB[x + nx * (y + ny * z)] = 1;
+  }
+  const fromA = reach(mask, { nx, ny, nz, srcA, srcB: new Uint8Array(N) }).seen;
+  let connected = false; for (let c = 0; c < N; c++) if (srcB[c] && fromA[c]) { connected = true; break; }
+  const all = reach(mask, { nx, ny, nz, srcA, srcB }).seen;
+  const f = new Float32Array(N); let islands = 0, vol = 0;
+  for (let c = 0; c < N; c++) {
+    if (mask[c] && !all[c]) { mask[c] = 0; islands++; continue; } // loose piece: dropped
+    f[c] = Math.min(1, Math.max(0, 0.5 - sd[c] / (2 * h)));
+    if (mask[c]) vol++;
+  }
+  const mesh = surfaceNets(f, nx, ny, nz, h, org), Sx = { nx, ny, nz, org, h, srcA, srcB, input: { keepOut: k } };
+  return { mesh, stats: { h, waist: W * 100, waistCut: W < Math.max(0, m.waist) / 100 - 1e-9, volCm3: (vol * h ** 3) / 1000, overhang: overhangs(mask, Sx), connected, islands, tris: mesh.i.length / 3, ms: performance.now() - t0 } };
+}
+
 let state = null, running = false, stopFlag = false;
 const GDIR = { "-X": [-1, 0, 0], "+X": [1, 0, 0], "-Y": [0, -1, 0], "+Y": [0, 1, 0], "-Z": [0, 0, -1], "+Z": [0, 0, 1] };
 
@@ -504,6 +633,11 @@ onmessage = async (e) => {
       const r = m.type === "smooth" ? smoothing(m.passes) : smoothClearance();
       postMessage({ type: "smoothed", id: m.id, ok: true, op: m.type, mesh: r.mesh, stats: r.stats }, [r.mesh.p.buffer, r.mesh.n.buffer, r.mesh.i.buffer]);
     } catch (err) { postMessage({ type: "smoothed", id: m.id, ok: false, error: err.message }); }
+    return;
+  }
+  if (m.type === "bridge") {
+    try { const r = bridge(m); postMessage({ type: "bridged", id: m.id, ok: true, stats: r.stats, mesh: r.mesh }, [r.mesh.p.buffer, r.mesh.n.buffer, r.mesh.i.buffer]); }
+    catch (err) { postMessage({ type: "bridged", id: m.id, ok: false, error: err.message }); }
     return;
   }
   if (m.type === "clearPreview") {
