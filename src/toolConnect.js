@@ -29,20 +29,19 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const btn = (label, fn) => Object.assign(document.createElement("button"), { textContent: label, onclick: fn });
 
   // ---------- panel ----------
-  const advL = document.createElement("label"), advC = Object.assign(document.createElement("input"), { type: "checkbox" });
-  advC.onchange = () => {
-    advanced = advC.checked;
+  document.addEventListener("advanced", (e) => {
+    if (e.detail.stage !== "C") return;
+    advanced = e.detail.on;
     if (!advanced) { S.vf = vfOf(S.str); S.h = clamp(S.h, tc.voxelSize); S.band = clamp(S.band, tc.designSpace); Object.assign(S, ADV); avoid.forEach((en) => (en.mm = clamp(en.mm, cfgOf(en)))); robot.mm = clamp(robot.mm, tc.avoid.robotOffsetMm); S.bd = clamp(S.bd, tc.bolt.diameterAdjustMm); S.bl = clamp(S.bl, tc.bolt.lengthAdjustMm); S.bslot = clamp(S.bslot, tc.bolt.slotLengthMm); S.waist = clamp(S.waist, tc.bridge.waistPercent); drawRobot(); renderAvoid(); }
     sync(); schedule();
-  };
-  advL.append(advC, " Advanced mode (type any value)"); panel.append(advL);
+  });
   const group = (from) => { const w = document.createElement("div"); w.append(...[...panel.children].slice(from)); panel.append(w); return w; }; // wraps what was added since `from`, to show or hide it per method
   const mRow = document.createElement("div"); mRow.className = "row"; mRow.innerHTML = "<label>Method</label>";
   const mSel = document.createElement("select"); tc.method.options.forEach((o) => mSel.add(new Option(o.label, o.id)));
   mSel.onchange = () => { S.method = mSel.value; refined = false; refOut.textContent = ""; clearCoarseGhost(); clearPrev(); clearResult(); lastStats = null; setInfo("", ""); sync(); run(); };
   mRow.append(mSel); panel.append(mRow);
 
-  head("Tool start surface");
+  head("Robot side surface");
   const sel = document.createElement("select");
   tc.toolStartConnection.options.forEach((o) => sel.add(new Option(o.label, o.id)));
   sel.onchange = () => { S.conn = sel.value; schedule(); };
@@ -50,11 +49,11 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
 
   head("Click in the 3D view");
   const clickHint = document.createElement("div"); clickHint.className = "rec";
-  clickHint.textContent = "Click: connect to a face of the tool end (green). Shift-click: avoid (red). Right-click: clear a green or red face or object.";
+  clickHint.textContent = "Click: connect to a face of the tool (green). Shift-click: avoid (red). Right-click: clear a green or red face or object.";
   const avSel = document.createElement("select"); [["face", "Shift-click avoids a face (extruded outward)"], ["object", "Shift-click avoids a whole object (grown)"]].forEach(([id, l]) => avSel.add(new Option(l, id)));
   panel.append(clickHint, avSel);
 
-  head("Tool end faces");
+  head("Tool faces");
   const count = document.createElement("div"), hint = document.createElement("div"); hint.className = "rec";
   panel.append(count, btn("Clear faces", () => { picked.clear(); updateHighlight(); sync(); schedule(); }));
 
@@ -85,9 +84,9 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
       if (onRemove) { const x = btn("✕", onRemove); x.title = "Stop avoiding this"; row.append(x); }
       avoidBox.append(row);
     };
-    addRow("Robot Avoidance (below the tool start)", tc.avoid.robotOffsetMm, () => robot.mm, (v) => { robot.mm = v; drawRobot(); }, "mm offset");
+    addRow("Robot Avoidance (below the robot side)", tc.avoid.robotOffsetMm, () => robot.mm, (v) => { robot.mm = v; drawRobot(); }, "mm offset");
     avoid.forEach((en) => addRow(
-      en.kind === "face" ? `Face ${en.fi + 1} of ${en.it.name}` : en.it.name + (en.obj === curPart ? " (tool end: ignored)" : ""),
+      en.kind === "face" ? `Face ${en.fi + 1} of ${en.it.name}` : en.it.name + (en.obj === curPart ? " (tool: ignored)" : ""),
       cfgOf(en), () => en.mm, (v) => (en.mm = v), en.kind === "face" ? "mm gap out" : "mm gap",
       () => { avoid.splice(avoid.indexOf(en), 1); dropEntry(en); renderAvoid(); schedule(); }));
     const loose = list.items().filter((i) => i.deletable !== false && i.object !== curPart && !avoid.some((en) => en.it === i));
@@ -194,7 +193,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   }
   refreshers.push(() => {
     const n = Math.hypot(...forceVec());
-    loadInfo.textContent = `One force on the tool end: ${n.toFixed(0)} N (${S.mass} kg × ${S.accel} × 9.81` + (S.fx || S.fy || S.fz ? " + extra" : "") + `), the yellow arrow in the 3D view.`;
+    loadInfo.textContent = `One force on the tool: ${n.toFixed(0)} N (${S.mass} kg × ${S.accel} × 9.81` + (S.fx || S.fy || S.fz ? " + extra" : "") + `), the yellow arrow in the 3D view.`;
     drawArrow();
   });
 
@@ -205,7 +204,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const fromBr = panel.children.length;
   head("Bridge");
   const brNote = document.createElement("div"); brNote.className = "rec";
-  brNote.textContent = "Instant: a solid wrap from the flange top to the green faces, narrower in the middle, minus the red zones, the tool start, Robot Avoidance and Bolt Clearance. It updates by itself after every change.";
+  brNote.textContent = "Instant: a solid wrap from the flange top to the green faces, narrower in the middle, minus the red zones, the robot side, Robot Avoidance and Bolt Clearance. It updates by itself after every change.";
   panel.append(brNote);
   numRow("Waist (% narrower in the middle)", tc.bridge.waistPercent, "waist");
   numRow("Bridge voxel size (mm)", tc.bridge.voxelSizeMm, "bh", () => !advanced);
@@ -213,7 +212,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const brG = group(fromBr), fromOpt2 = panel.children.length;
   head("Generate");
   const genNote = document.createElement("div"); genNote.className = "rec";
-  genNote.textContent = "One click: designs the connector, clears the red zones, the tool start, Robot Avoidance and Bolt Clearance (orange ghost = the gap around red items), drops loose pieces, then refines on the finer voxel if ticked.";
+  genNote.textContent = "One click: designs the connector, clears the red zones, the robot side, Robot Avoidance and Bolt Clearance (orange ghost = the gap around red items), drops loose pieces, then refines on the finer voxel if ticked.";
   const rfL = document.createElement("label"), rfC = Object.assign(document.createElement("input"), { type: "checkbox" });
   rfC.onchange = () => { S.refineEnd = rfC.checked; sync(); }; rfL.append(rfC, " Refine at the end (finer, slower)"); rfL.title = tc.refineAtEnd.note;
   panel.append(genNote, rfL);
@@ -296,7 +295,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
 
   const selfBox = document.createElement("div"), selfOut = document.createElement("div"); selfOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
   selfBox.append(btn("Run solver self-test", () => { selfOut.textContent = "Running…"; ensureWorker().postMessage({ type: "selftest" }); }), selfOut); panel.append(selfBox);
-  refreshers.push(() => { count.textContent = `${picked.size} face(s) selected`; sel.value = S.conn; stSel.value = S.str; prC.checked = S.print; gSel.value = S.gdir; gRow.style.display = advanced ? "" : "none"; advC.checked = advanced; selfBox.style.display = advanced ? "" : "none"; });
+  refreshers.push(() => { count.textContent = `${picked.size} face(s) selected`; sel.value = S.conn; stSel.value = S.str; prC.checked = S.print; gSel.value = S.gdir; gRow.style.display = advanced ? "" : "none"; selfBox.style.display = advanced ? "" : "none"; });
 
   function setLock(on) {
     running = on; panel.querySelectorAll("input,select,button").forEach((x) => (x.disabled = on));
@@ -492,7 +491,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
       if (!m.stopped && predRef && secPerElem != null) learn("ref", m.elapsed, refWork(predRef.count, m.it) * secPerElem * 1000);
       showResult(m.mesh); canClear = true; refined = true; rfBar.value = m.stopped ? rfBar.value : 1; sync();
       const t = m.stats; vol = t.volCm3; over = t.overhang; sag = m.sag; showSummary();
-      refOut.innerHTML = `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔" : "⚠ The tool start and the tool end are no longer connected."} Refine ${m.stopped ? "stopped" : "finished"} after ${m.it} steps in ${fmt(m.elapsed)}. Voxel ${m.h.toFixed(2)} mm (analysis was ${m.hc.toFixed(2)} mm).` + (advanced ? `<br>Stiffness: ${(m.c0 / m.c).toFixed(2)}× the coarse design. Material: ${((m.vol / m.cap) * 100).toFixed(0)}% of the coarse volume. ${t.islands.toLocaleString()} loose voxels dropped.` : "") + "</span>";
+      refOut.innerHTML = `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔" : "⚠ The robot side and the tool are no longer connected."} Refine ${m.stopped ? "stopped" : "finished"} after ${m.it} steps in ${fmt(m.elapsed)}. Voxel ${m.h.toFixed(2)} mm (analysis was ${m.hc.toFixed(2)} mm).` + (advanced ? `<br>Stiffness: ${(m.c0 / m.c).toFixed(2)}× the coarse design. Material: ${((m.vol / m.cap) * 100).toFixed(0)}% of the coarse volume. ${t.islands.toLocaleString()} loose voxels dropped.` : "") + "</span>";
       return;
     }
     if (m.type === "bridged") {
@@ -500,7 +499,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
       if (!m.ok) { clearResult(); brOut.innerHTML = `<span class="bad">✖ ${m.error}</span>`; return; }
       showResult(m.mesh); bridged = m.mesh.i.length > 0; sync();
       const t = m.stats; vol = t.volCm3; over = t.overhang; sag = null; showSummary();
-      brOut.innerHTML = `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔ Bridge ready" : "⚠ The keep-outs cut the bridge: the tool start and the tool end are not connected"} in ${(t.ms / 1000).toFixed(1)} s.</span>`
+      brOut.innerHTML = `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔ Bridge ready" : "⚠ The keep-outs cut the bridge: the robot side and the tool are not connected"} in ${(t.ms / 1000).toFixed(1)} s.</span>`
         + (t.waistCut ? `<br><span class="warn">Print-ready: waist lowered to ${t.waist.toFixed(0)}% so the walls do not overhang more than 45°.</span>` : "")
         + (advanced ? `<br>Voxel ${t.h.toFixed(2)} mm, ${t.tris.toLocaleString()} triangles, ${t.islands.toLocaleString()} loose cells dropped.` : "");
       return;
@@ -513,14 +512,14 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
       keep(() => showResult(m.mesh)); canClear = true; sync();
       const t = m.stats; if (t.volCm3 != null) { vol = t.volCm3; over = null; showSummary(); }
       smOut.innerHTML = m.reset ? `<span class="ok">Back to voxels.</span>`
-        : `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔" : "⚠ The tool start and the tool end are no longer connected."} ${m.op === "smoothClear" ? `Cut ${t.cut.toLocaleString()} cells in the zones. ` : ""}${t.islands ? `${t.islands.toLocaleString()} loose cells dropped. ` : ""}Volume ${t.volCm3.toFixed(1)} cm³, ${t.tris.toLocaleString()} triangles.</span>`;
+        : `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔" : "⚠ The robot side and the tool are no longer connected."} ${m.op === "smoothClear" ? `Cut ${t.cut.toLocaleString()} cells in the zones. ` : ""}${t.islands ? `${t.islands.toLocaleString()} loose cells dropped. ` : ""}Volume ${t.volCm3.toFixed(1)} cm³, ${t.tris.toLocaleString()} triangles.</span>`;
       return;
     }
     if (m.type === "cleared") {
       if (!m.ok) { chain = false; setLock(false); clrOut.innerHTML = `<span class="bad">✖ ${m.error}</span>`; return; }
       const t = m.stats; keep(() => showResult(m.mesh)); canClear = true;
       vol = t.volCm3; over = t.overhang; showSummary();
-      clrOut.innerHTML = `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔ Cleared" : "⚠ The tool start and the tool end are no longer connected"}: ${t.cut.toLocaleString()} voxels deleted in the zones, ${t.islands.toLocaleString()} loose voxels dropped.</span>`;
+      clrOut.innerHTML = `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔ Cleared" : "⚠ The robot side and the tool are no longer connected"}: ${t.cut.toLocaleString()} voxels deleted in the zones, ${t.islands.toLocaleString()} loose voxels dropped.</span>`;
       if (chain && S.refineEnd && canRefine()) { chain = false; refine(); return; }
       if (chain) { chain = false; setLock(false); } else sync();
       return;
@@ -553,10 +552,10 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   }
   function run() {
     syncPart(); const st = getStart();
-    if (!st) return setInfo("warn", "Tool start is not ready yet.");
-    if (!curPart) { bGo.disabled = true; cog = null; drawArrow(); return setInfo("warn", "Add a part in step 2 (Tool end) first."); }
+    if (!st) return setInfo("warn", "Robot side is not ready yet.");
+    if (!curPart) { bGo.disabled = true; cog = null; drawArrow(); return setInfo("warn", "Add a part in step 2 (Tool) first."); }
     cog = solidCentroid(endTris(true)); drawArrow();
-    if (!picked.size) { lastStats = null; bGo.disabled = true; clearPrev(); clearResult(); return setInfo("warn", "Click one or more faces of the tool end to choose where the connector attaches. They turn green."); }
+    if (!picked.size) { lastStats = null; bGo.disabled = true; clearPrev(); clearResult(); return setInfo("warn", "Click one or more faces of the tool to choose where the connector attaches. They turn green."); }
     if (S.method === "bridge") return runBridge(st);
     ensureWorker(); bGo.disabled = true; drawRobot();
     const R = startR(st.dims);

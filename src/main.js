@@ -7,6 +7,7 @@ import { initToolEnd } from './toolEnd.js';
 import { initToolConnect } from './toolConnect.js';
 import { initObjectList } from './objectList.js';
 import { initExport } from './exportStage.js';
+import { initAdvanced, initSteps } from './ui.js';
 
 const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
 const $ = (id) => document.getElementById(id);
@@ -17,7 +18,7 @@ const tolCfg = ts.tolerances;
 const settings = { fitMode: ts.fitMode.default, thickness: ts.thickness.default, dowelMode: ts.dowel.mode.default, headSeat: ts.screwClearance.headSeat.default,
   plateMargin: ts.plateEdgeMargin.default, spigotStyle: ts.spigotStyle.default, wallKeys: ts.wallKeys.default, chamfer: { robotFacing: false, awayFacing: false, size: ts.chamfer.size.default },
   tolerances: Object.fromEntries(Object.entries(tolCfg).filter(([, v]) => typeof v === "object").map(([k, v]) => [k, v.default])) };
-let advanced = false, reqId = 0, timer = null, startInfo = null;
+let advanced = false, reqId = 0, timer = null, startInfo = null, startOk = false;
 const refreshers = [];
 const g = () => cur.flange.geometry;
 
@@ -72,8 +73,8 @@ T("dowelPin", "Printed dowel tolerance (mm)", () => settings.dowelMode === "prin
 check("Chamfer, faces toward the robot", () => settings.chamfer.robotFacing, (v) => (settings.chamfer.robotFacing = v));
 check("Chamfer, faces away from the robot", () => settings.chamfer.awayFacing, (v) => (settings.chamfer.awayFacing = v));
 slider("Chamfer size (mm)", ts.chamfer.size, () => settings.chamfer.size, (v) => (settings.chamfer.size = v), () => true, () => !advanced);
-check("Advanced mode (type any value)", () => advanced, (v) => { advanced = v; if (!v) settings.chamfer.size = ts.chamfer.size.default; });
-$("top").append($("controls").lastElementChild);
+initAdvanced($("adv"));
+document.addEventListener("advanced", (e) => { if (e.detail.stage !== "A") return; advanced = e.detail.on; if (!advanced) settings.chamfer.size = ts.chamfer.size.default; refreshAll(); schedule(); });
 
 // ---------- local flange form ----------
 const fields = [["name", "Name (e.g. My robot)", "text"], ["pcd", "Pitch circle diameter", "number"], ["thread", "Screw thread", "M3,M4,M5,M6,M8,M10,M12"], ["threadDepth", "Thread depth", "number"],
@@ -129,9 +130,9 @@ function schedule() { clearTimeout(timer); timer = setTimeout(build, 250); }
 function build() { $("status").textContent = "Building…"; worker.postMessage({ type: "build", id: ++reqId, flange: JSON.parse(JSON.stringify(cur.flange)), settings: structuredClone(settings) }); }
 worker.onmessage = (e) => {
   const m = e.data;
-  if (m.exported) { const url = URL.createObjectURL(new Blob([m.data])); Object.assign(document.createElement("a"), { href: url, download: `tool_start_${cur.flange.id}.${m.format}` }).click(); return; }
+  if (m.exported) { const url = URL.createObjectURL(new Blob([m.data])); Object.assign(document.createElement("a"), { href: url, download: `robot_side_${cur.flange.id}.${m.format}` }).click(); return; }
   if (m.id !== reqId) return;
-  $("status").textContent = m.ok ? "Ready" : "Cannot build";
+  $("status").textContent = m.ok ? "Ready" : "Cannot build"; startOk = !!m.ok;
   $("msg").innerHTML = [...(m.errors || []).map((x) => `<div class="bad">✖ ${x}</div>`), ...(m.warnings || []).map((x) => `<div class="warn">⚠ ${x}</div>`)].join("");
   if (m.ok) { show(m.mesh); startInfo = m; document.dispatchEvent(new Event("startbuilt")); }
 };
@@ -142,3 +143,8 @@ initFooterLinks();
 const toolEnd = initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers, list });
 const toolConnect = initToolConnect({ scene, cam, renderer, $, toolEnd, getStart: () => startInfo, list });
 initExport({ worker, $, list, toolEnd, toolConnect, getStart: () => startInfo, getFlangeId: () => cur.flange.id });
+initSteps({
+  A: () => (startOk ? null : $("status").textContent === "Building…" ? "Building the robot side…" : "The robot side cannot be built. See the message above."),
+  B: () => (toolEnd.getPart() ? null : "No object yet. Import a STEP file or add a primitive."),
+  C: () => (toolConnect.getResult() ? null : "No connector yet. Click the tool faces it should attach to."),
+});

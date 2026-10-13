@@ -46,7 +46,7 @@ async function exportScene(m) {
     const parts = m.items.map((it) => {
       if (it.src === "mesh") return { name: it.name, v: it.v, t: it.t };
       const base = it.src === "start" ? last : shapes.get(it.sid);
-      if (!base) throw new Error(`"${it.name}" is not in the geometry engine. Rebuild the tool start or add the part again.`);
+      if (!base) throw new Error(`"${it.name}" is not in the geometry engine. Rebuild the robot side or add the part again.`);
       const s = it.src === "part" ? place(base, it) : base;
       if (s !== base) own.push(s);
       return { name: it.name, shape: s };

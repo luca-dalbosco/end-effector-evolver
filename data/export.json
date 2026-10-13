@@ -2,9 +2,9 @@
   "scope": {
     "default": "tool",
     "options": [
-      { "id": "start", "label": "Tool start only" },
-      { "id": "tool", "label": "Tool (the connector), with or without tool start and tool end" },
-      { "id": "all", "label": "All objects, each in its place (tool start, connector, tool end, avoid objects)" }
+      { "id": "start", "label": "Robot side only" },
+      { "id": "tool", "label": "Connector, with or without robot side and tool" },
+      { "id": "all", "label": "All objects, each in its place (robot side, connector, tool, avoid objects)" }
     ]
   },
   "withToolStart": { "default": false },
