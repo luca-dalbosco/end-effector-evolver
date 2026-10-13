@@ -17,6 +17,19 @@
     ]
   },
   "volumeFraction": { "min": 0.05, "max": 0.6, "step": 0.01, "default": 0.25, "recommendedRange": [0.1, 0.4], "note": "Share of the design space that may be filled. Left = light, right = strong." },
+  "strength": {
+    "default": "balanced",
+    "options": [
+      { "id": "light", "label": "Light", "vf": 0.15 },
+      { "id": "balanced", "label": "Balanced", "vf": 0.25 },
+      { "id": "strong", "label": "Strong", "vf": 0.4 }
+    ]
+  },
+  "printReady": { "default": false, "smoothMaxPower": 40, "smoothMinEps": 0.0001, "startDensity": 0.5, "note": "Print-ready (test): printed with the flange face on the bed. Nothing grows below the bed, and every voxel must rest on voxels below it (45° overhang at most), so there are no supports and no floating islands. Method: additive manufacturing filter (Langelaar 2017)." },
+  "refineAtEnd": { "default": true, "note": "Generate ends with a Refine run at the refined voxel size (slower, nicer result)." },
+  "material": { "label": "PLA", "densityGcm3": 1.24, "youngsModulusMPa": 2300, "note": "Used only for the weight and sag readout (solid, 100% infill). Printed parts are weaker across layers." },
+  "cantileverRatio": { "min": 0.7, "max": 1.05, "note": "Self-test: the solver's cantilever tip drop divided by beam theory must fall in this range." },
+  "arrowLengthMm": 60,
   "filterRadius": { "min": 1.2, "max": 4, "step": 0.1, "default": 2, "recommendedRange": [1.5, 3], "note": "In voxels. Bigger = thicker, smoother members." },
   "maxIterations": { "min": 10, "max": 300, "step": 10, "default": 40, "recommendedRange": [30, 100], "note": "The design stops earlier when it stops changing." },
   "payloadMassKg": { "min": 0.1, "max": 100, "step": 0.1, "default": 2, "note": "Mass of the tool end and what it carries." },
@@ -31,6 +44,8 @@
   },
   "bolt": {
     "lengthMarginMm": 0.25,
+    "shape": { "default": "slot", "options": [{ "id": "cylinder", "label": "Cylinder (above the head only)" }, { "id": "slot", "label": "Slot (runs outward from the flange centre)" }] },
+    "slotLengthMm": { "min": 0, "max": 200, "step": 1, "default": 25, "recommendedRange": [10, 50], "note": "How far the slot runs outward from each screw, away from the flange centre. Keeps inner screws reachable." },
     "diameterMarginMm": 0.25,
     "diameterAdjustMm": { "min": -1, "max": 10, "step": 0.25, "default": 0, "recommendedRange": [0, 2], "note": "Added to the head clearance diameter of the tool start (Allen head + 0.25)." },
     "lengthAdjustMm": { "min": -1, "max": 50, "step": 0.25, "default": 0, "recommendedRange": [0, 5], "note": "Added to the head height + 0.25 of the tool start." }
