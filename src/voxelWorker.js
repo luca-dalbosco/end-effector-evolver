@@ -2,16 +2,18 @@
 // Pure JavaScript, no geometry kernel. Units: mm.
 
 import { createFem, selfTest } from "./fem.js";
+import { optimize } from "./optimizer.js";
+import { voxelizeSolid, connected, solidCentroid, nodalLoads } from "./voxelize.js";
 const BIG = 1e9;
 
 // Speed test: seconds per element for one real solver matrix-vector product.
 function bench() {
   const fem = createFem({ nx: 12, ny: 12, nz: 12 }), x = Float64Array.from({ length: fem.ndof }, (_, i) => Math.sin(i)), y = new Float64Array(fem.ndof);
   fem.setDensity(new Float64Array(fem.nel).fill(1));
-  fem.matvec(x, y);
+  for (let r = 0; r < 20; r++) fem.matvec(x, y); // warm-up so the speed test is not pessimistic
   const t0 = performance.now();
-  for (let r = 0; r < 10; r++) fem.matvec(x, y);
-  return (performance.now() - t0) / 1000 / (10 * fem.nel);
+  for (let r = 0; r < 20; r++) fem.matvec(x, y);
+  return (performance.now() - t0) / 1000 / (20 * fem.nel);
 }
 
 // Points on triangles (flat list, 9 numbers per triangle), pushed slightly to the outside of the face.
@@ -91,6 +93,9 @@ function exposed(mask, nx, ny, nz, h, org) {
   return { p, n, i: ix };
 }
 
+let state = null, running = false, stopFlag = false;
+const GDIR = { "-X": [-1, 0, 0], "+X": [1, 0, 0], "-Y": [0, -1, 0], "+Y": [0, 1, 0], "-Z": [0, 0, -1], "+Z": [0, 0, 1] };
+
 function compute(m) {
   let h = m.h;
   const A = samplePoints(m.startTris, h, m.R), B = samplePoints(m.endTris, h, null);
@@ -102,6 +107,7 @@ function compute(m) {
   }
   const Lest = Math.hypot(ca[0] - cb[0], ca[1] - cb[1], ca[2] - cb[2]);
   const side = 0.5 * Math.sqrt((1 + m.band) ** 2 - 1) * Lest;
+  const cog = solidCentroid(m.endAll);
   let retried = false;
   for (;;) {
     const pad = side + 2 * h, org = lo.map((v) => v - pad), dim = hi.map((v, a) => Math.ceil((v + pad - org[a]) / h) + 1);
@@ -117,31 +123,75 @@ function compute(m) {
     let best = Infinity;
     for (let c = 0; c < N; c++) { const s = Math.sqrt(fA[c]) + Math.sqrt(fB[c]); if (s < best) best = s; }
     if (best < 1) throw new Error("The tool start and the picked faces touch or overlap. Move the tool end away from the tool start.");
-    const thr = best * (1 + m.band), dom = new Uint8Array(N), uni = new Uint8Array(N);
-    let count = 0, nA = 0, nB = 0;
-    const layer = nx * ny;
+    const thr = best * (1 + m.band);
+    const kS = voxelizeSolid(m.startAll, nx, ny, nz, org, h), kE = voxelizeSolid(m.endAll, nx, ny, nz, org, h);
+    const free = new Uint8Array(N), vis = new Uint8Array(N), uni = new Uint8Array(N);
+    let count = 0, nA = 0, nB = 0, nFree = 0;
     for (let c = 0; c < N; c++) {
       if (srcA[c]) nA++; if (srcB[c]) nB++;
-      uni[c] = srcA[c] | srcB[c];
-      const above = org[2] + (Math.floor(c / layer) + 1) * h > m.zClip; // nothing below the tool start top plane
-      if (uni[c] || (above && Math.sqrt(fA[c]) + Math.sqrt(fB[c]) <= thr)) { dom[c] = 1; count++; }
+      if (srcA[c] || srcB[c]) { uni[c] = 1; vis[c] = 1; count++; }
+      else if (!kS[c] && !kE[c] && Math.sqrt(fA[c]) + Math.sqrt(fB[c]) <= thr) { free[c] = 1; vis[c] = 1; count++; nFree++; }
     }
+    if (!connected(vis, srcA, srcB, nx, ny, nz)) throw new Error("The tool start or tool end blocks the way between the surfaces. Increase the design space size.");
     if (count > m.budget * 1.1 && !retried) { retried = true; h *= Math.cbrt(count / m.budget) * 1.02; continue; }
+    state = { nx, ny, nz, h, org, srcA, srcB, free, cog };
     return {
-      stats: { h, dim, count, L: best * h, nA, nB, overBudget: count > m.budget * 1.1 },
-      dom: exposed(dom, nx, ny, nz, h, org), src: exposed(uni, nx, ny, nz, h, org),
+      stats: { h, dim, count, nFree, L: best * h, nA, nB, overBudget: count > m.budget * 1.1 },
+      dom: exposed(vis, nx, ny, nz, h, org), src: exposed(uni, nx, ny, nz, h, org),
     };
   }
 }
 
-onmessage = (e) => {
+async function runOptimize(m) {
+  const S = state, { nx, ny, nz, h, org } = S, N = nx * ny * nz, sx = nx + 1, sy = ny + 1;
+  const node = (i, j, k) => i + sx * (j + sy * k);
+  const active = new Uint8Array(N), passive = new Uint8Array(N), fixedMask = new Uint8Array(3 * sx * sy * (nz + 1)), force = new Float64Array(fixedMask.length);
+  const fixedNodes = new Set(), loadNodes = new Set();
+  const corners = (c, fn) => { const i = c % nx, j = Math.floor(c / nx) % ny, k = Math.floor(c / (nx * ny));
+    for (let dk = 0; dk < 2; dk++) for (let dj = 0; dj < 2; dj++) for (let di = 0; di < 2; di++) fn(node(i + di, j + dj, k + dk)); };
+  for (let c = 0; c < N; c++) {
+    if (S.free[c] || S.srcA[c] || S.srcB[c]) active[c] = 1;
+    if (S.srcA[c] || S.srcB[c]) passive[c] = 1;
+    if (S.srcA[c]) corners(c, (n) => fixedNodes.add(n)); else if (S.srcB[c]) corners(c, (n) => loadNodes.add(n));
+  }
+  fixedNodes.forEach((n) => { fixedMask[3 * n] = fixedMask[3 * n + 1] = fixedMask[3 * n + 2] = 1; loadNodes.delete(n); });
+  const ids = [...loadNodes], pos = new Float64Array(3 * ids.length);
+  ids.forEach((n, q) => { pos[3 * q] = org[0] + (n % sx) * h; pos[3 * q + 1] = org[1] + (Math.floor(n / sx) % sy) * h; pos[3 * q + 2] = org[2] + Math.floor(n / (sx * sy)) * h; });
+  const g = GDIR[m.gdir] || GDIR["-Y"], mag = m.mass * m.accel * 9.81;
+  const F = [g[0] * mag + m.extra[0], g[1] * mag + m.extra[1], g[2] * mag + m.extra[2]];
+  if (Math.hypot(...F) < 1e-9) throw new Error("The load is zero. Check payload mass and extra force.");
+  const loads = nodalLoads(pos, F, S.cog);
+  ids.forEach((n, q) => { for (let d = 0; d < 3; d++) force[3 * n + d] = loads[3 * q + d]; });
+
+  const meshOf = (rho) => { const mask = new Uint8Array(N); for (let c = 0; c < N; c++) if (active[c] && rho[c] > 0.5) mask[c] = 1; return exposed(mask, nx, ny, nz, h, org); };
+  const bufs = (mesh) => [mesh.p.buffer, mesh.n.buffer, mesh.i.buffer];
+  const t0 = performance.now();
+  const res = await optimize({ nx, ny, nz, active, passive, fixedMask, force, vf: m.vf, rmin: m.rmin, maxIter: m.maxIter }, async (s) => {
+    const msg = { type: "progress", id: m.id, it: s.it, maxIter: s.maxIter, c: s.c, c0: s.c0, vol: s.vol, change: s.change, cg: s.cg, elapsed: performance.now() - t0 };
+    if (s.it % 2 === 1) msg.mesh = meshOf(s.rho);
+    postMessage(msg, msg.mesh ? bufs(msg.mesh) : []);
+    await new Promise((r) => setTimeout(r, 0)); // lets a Stop message arrive
+  }, () => stopFlag);
+  S.result = res.rho;
+  const mesh = meshOf(res.rho);
+  postMessage({ type: "done", id: m.id, ok: true, it: res.it, c: res.c, c0: res.c0, vol: res.vol, stopped: res.stopped, converged: res.converged, elapsed: performance.now() - t0, mesh }, bufs(mesh));
+}
+
+onmessage = async (e) => {
   const m = e.data;
+  if (m.type === "stop") { stopFlag = true; return; }
+  if (running) { if (m.type === "domain") postMessage({ type: "domain", id: m.id, ok: false, error: "A design is running. Press Stop first." }); return; }
   if (m.type === "bench") return postMessage({ type: "bench", secPerElem: bench() });
   if (m.type === "selftest") return postMessage({ type: "selftest", results: selfTest() });
-  if (m.type !== "domain") return;
-  try {
-    const r = compute(m);
-    postMessage({ type: "domain", id: m.id, ok: true, stats: r.stats, dom: r.dom, src: r.src },
-      [r.dom.p.buffer, r.dom.n.buffer, r.dom.i.buffer, r.src.p.buffer, r.src.n.buffer, r.src.i.buffer]);
-  } catch (err) { postMessage({ type: "domain", id: m.id, ok: false, error: err.message }); }
+  if (m.type === "domain") {
+    try {
+      const r = compute(m);
+      postMessage({ type: "domain", id: m.id, ok: true, stats: r.stats, dom: r.dom, src: r.src },
+        [r.dom.p.buffer, r.dom.n.buffer, r.dom.i.buffer, r.src.p.buffer, r.src.n.buffer, r.src.i.buffer]);
+    } catch (err) { postMessage({ type: "domain", id: m.id, ok: false, error: err.message }); }
+  } else if (m.type === "optimize") {
+    running = true; stopFlag = false;
+    try { await runOptimize(m); } catch (err) { postMessage({ type: "done", id: m.id, ok: false, error: err.message }); }
+    running = false;
+  }
 };
