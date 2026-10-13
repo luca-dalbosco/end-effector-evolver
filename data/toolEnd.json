@@ -12,8 +12,6 @@
     { "id": "octahedron", "label": "Octahedron" },
     { "id": "dodecahedron", "label": "Dodecahedron" },
     { "id": "icosahedron", "label": "Icosahedron" },
-    { "id": "cuboctahedron", "label": "Cuboctahedron" },
-    { "id": "testConnect", "label": "testConnect (organic test bracket)" },
-    { "id": "testAvoid", "label": "testAvoid (organic hooked bar)" }
+    { "id": "cuboctahedron", "label": "Cuboctahedron" }
   ]
 }
