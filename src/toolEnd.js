@@ -13,7 +13,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
   const dom = renderer.domElement;
 
   // ---------- panel (shown only in stage B) ----------
-  const stageA = ["top", "controls", "msg", "exportA"].map($);
+  const stageA = ["controls", "msg", "exportA"].map($);
   const panel = document.createElement("div"); panel.style.display = "none"; $("exportA").after(panel);
   const spans = document.querySelectorAll("#steps span[data-s]");
   spans.forEach((s) => (s.onclick = () => showStage(s.dataset.s)));
