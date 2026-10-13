@@ -30,6 +30,31 @@ function faceOf(V, n) {
   return pts.sort((a, b) => ang(a) - ang(b));
 }
 
+// Organic-looking test shapes: capsules (a cylinder with a ball on each end) fused together, plus flat pads to click on.
+// Radii along one chain always get smaller, so no two balls are identical (keeps the boolean clean).
+const capsule = (a, b, r) => {
+  const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], L = Math.hypot(...d);
+  return R.makeCylinder(r * 0.98, L, a, d.map((x) => x / L)).fuse(R.makeSphere(r).translate(a)).fuse(R.makeSphere(r).translate(b));
+};
+const chain = (pts, rs, u) => pts.slice(1).map((p, i) => capsule(pts[i].map((x) => x * u), p.map((x) => x * u), rs[i] * u));
+const pad = (c, axis, r, len, u) => R.makeCylinder(r * u, len * u, c.map((x, i) => (x - (axis[i] * len) / 2) * u), axis);
+const TEST = {
+  testConnect: (u) => [ // a forked bracket: hub with two arms, a rib and a cross-brace; flat pads at the hub and at the three tips
+    ...chain([[-0.5, 0, 0], [-0.15, 0.2, 0.02], [0.2, 0.27, 0], [0.46, 0.2, 0]], [0.07, 0.055, 0.045], u),
+    ...chain([[-0.5, 0, 0], [-0.15, -0.2, 0.05], [0.2, -0.27, 0.06], [0.46, -0.2, 0.08]], [0.065, 0.05, 0.04], u),
+    ...chain([[-0.5, 0, 0], [-0.1, 0, 0.17], [0.2, 0, 0.2], [0.4, 0, 0.1]], [0.06, 0.048, 0.038], u),
+    ...chain([[0.2, 0.27, 0], [0.2, -0.27, 0.06]], [0.03], u),
+    R.makeSphere(0.1 * u).translate(-0.5 * u, 0, 0),
+    pad([-0.54, 0, 0], [-1, 0, 0], 0.08, 0.14, u), pad([0.5, 0.2, 0], [1, 0, 0], 0.075, 0.08, u),
+    pad([0.5, -0.2, 0.08], [1, 0, 0], 0.075, 0.08, u), pad([0.44, 0, 0.1], [1, 0, 0], 0.07, 0.08, u),
+  ],
+  testAvoid: (u) => [ // a hooked bar with a side branch (something the connector has to go around)
+    ...chain([[-0.55, 0, -0.1], [-0.1, 0, -0.1], [0.25, 0, -0.1], [0.4, 0, 0], [0.45, 0, 0.2]], [0.05, 0.045, 0.04, 0.035], u),
+    ...chain([[-0.1, 0, -0.1], [-0.1, 0.25, -0.05], [0, 0.4, 0.05]], [0.032, 0.026], u),
+    pad([-0.6, 0, -0.1], [-1, 0, 0], 0.08, 0.1, u), pad([0.45, 0, 0.24], [0, 0, 1], 0.07, 0.08, u), pad([0, 0.43, 0.05], [0, 1, 0], 0.06, 0.08, u),
+  ],
+};
+
 export function buildPrimitive(kind, size) {
   if (!(size > 0)) throw new Error("Size must be above 0.");
   const r = size / 2;
@@ -40,6 +65,7 @@ export function buildPrimitive(kind, size) {
     let pen = R.draw(pts[0]); for (let i = 1; i < pts.length; i++) pen = pen.lineTo(pts[i]);
     return pen.close().sketchOnPlane("XZ").revolve([0, 0, 1]);
   }
+  if (TEST[kind]) return TEST[kind](size / 1.2).reduce((a, b) => a.fuse(b)); // size = overall length
   const make = SOLIDS[kind]; if (!make) throw new Error("Unknown primitive: " + kind);
   const [V, N] = make();
   const k = kind === "cube" ? r : r / Math.max(...V.map((v) => Math.hypot(...v))); // cube: edge = size; others: overall diameter = size
