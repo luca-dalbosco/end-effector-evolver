@@ -3,3 +3,12 @@ node_modules/
 
 # VS Code Bullshit
 .vs
+
+# Secrets: NEVER commit
+secrets.env
+*.env
+.env
+.env.*
+
+# Build output
+dist/
