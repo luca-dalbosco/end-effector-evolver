@@ -1,4 +1,18 @@
 {
+  "method": {
+    "default": "bridge",
+    "options": [
+      { "id": "bridge", "label": "Basic: Bridge (instant, solid)" },
+      { "id": "optimize", "label": "Advanced: Optimize (slow, light)" }
+    ]
+  },
+  "bridge": {
+    "waistPercent": { "min": 0, "max": 60, "step": 5, "default": 30, "recommendedRange": [10, 40], "note": "How much narrower the middle is than a straight wrap. 0 = straight wrap. With Print-ready on, it is lowered automatically so the walls never overhang more than 45°." },
+    "voxelSizeMm": { "min": 0.3, "max": 2, "step": 0.05, "default": 0.6, "recommendedRange": [0.4, 1], "note": "Grid used to draw the bridge surface. Smaller = smoother and more exact, but slower. Made coarser automatically on big parts." },
+    "circleSegments": 96,
+    "printCheckCells": 300000,
+    "printWaistSteps": 6
+  },
   "voxelSize": { "min": 0.5, "max": 2, "step": 0.1, "default": 1.5, "recommendedRange": [0.5, 2], "note": "Refined voxel size, used only by the Refine step (the first design uses a coarser voxel set by the voxel limit)." },
   "designSpace": { "min": 0.05, "max": 2, "step": 0.05, "default": 0.25, "recommendedRange": [0.1, 0.4], "note": "How far the connector may wander from the straight path, as a fraction of the gap between the surfaces." },
   "analysisVoxelBudget": { "min": 1000, "max": 200000, "step": 1000, "default": 6000, "recommendedRange": [3000, 40000], "note": "Maximum voxels in the design space. Fewer = much faster." },
