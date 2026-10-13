@@ -132,11 +132,11 @@ worker.onmessage = (e) => {
   if (m.id !== reqId) return;
   $("status").textContent = m.ok ? "Ready" : "Cannot build";
   $("msg").innerHTML = [...(m.errors || []).map((x) => `<div class="bad">✖ ${x}</div>`), ...(m.warnings || []).map((x) => `<div class="warn">⚠ ${x}</div>`)].join("");
-  if (m.ok) { show(m.mesh); startInfo = m; }
+  if (m.ok) { show(m.mesh); startInfo = m; document.dispatchEvent(new Event("startbuilt")); }
 };
 document.querySelectorAll("button[data-f]").forEach((b) => (b.onclick = () => worker.postMessage({ type: "export", id: reqId, format: b.dataset.f })));
 refreshAll(); build();
 
 initFooterLinks(); 
 const toolEnd = initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers, list });
-initToolConnect({ scene, cam, renderer, $, toolEnd, getStart: () => startInfo });
+initToolConnect({ scene, cam, renderer, $, toolEnd, getStart: () => startInfo, list });

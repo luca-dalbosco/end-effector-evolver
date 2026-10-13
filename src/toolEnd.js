@@ -160,7 +160,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
   panel.append(kindSel);
   numRow("Size (mm)", te.primitiveSize, () => primSize, (v) => { primSize = v; }, false);
   const hint = document.createElement("div"); hint.className = "rec";
-  hint.textContent = "Cube: edge length. Cylinder and cone: diameter and height. Sphere and other solids: overall diameter. The type and size above are used by \"Add primitive\" (a new object) or \"Apply to selected primitive\" (changes the selected one).";
+  hint.textContent = "Cube: edge length. Cylinder and cone: diameter and height. Sphere and other solids: overall diameter. testConnect and testAvoid: overall length (organic test shapes with flat pads). The type and size above are used by \"Add primitive\" (a new object) or \"Apply to selected primitive\" (changes the selected one).";
   const bApply = btn("Apply to selected primitive", () => partKind && sendPrim(true));
   refreshers.push(() => (bApply.disabled = !partKind));
   panel.append(hint, btn("Add primitive", () => sendPrim(false)), bApply);
