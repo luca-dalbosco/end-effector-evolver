@@ -54,7 +54,11 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart }) 
   numRow("Max analysis voxels", tc.analysisVoxelBudget, "budget", () => !advanced);
   const info = document.createElement("div"); info.style.cssText = "font-size:12px;margin:10px 0;line-height:1.5"; panel.append(info);
   const setInfo = (cls, html) => { info.className = cls; info.innerHTML = html; };
-  refreshers.push(() => { count.textContent = `${picked.size} face(s) selected`; sel.value = S.conn; advC.checked = advanced; });
+  const selfBox = document.createElement("div"), selfOut = document.createElement("div");
+  selfOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
+  selfBox.append(Object.assign(document.createElement("button"), { textContent: "Run solver self-test", onclick: () => { selfOut.textContent = "Running…"; ensureWorker().postMessage({ type: "selftest" }); } }), selfOut);
+  panel.append(selfBox);
+  refreshers.push(() => { count.textContent = `${picked.size} face(s) selected`; sel.value = S.conn; advC.checked = advanced; selfBox.style.display = advanced ? "" : "none"; });
 
   // ---------- face picking on the tool end ----------
   const hlMat = new THREE.MeshBasicMaterial({ color: 0x2ecc71, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
@@ -137,19 +141,21 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart }) 
   function onMsg(e) {
     const m = e.data;
     if (m.type === "bench") { secPerElem = m.secPerElem; return showEstimate(); }
+    if (m.type === "selftest") { selfOut.innerHTML = m.results.map((r) => `<div class="${r.ok === null ? "" : r.ok ? "ok" : "bad"}">${r.ok === null ? "ℹ" : r.ok ? "✔" : "✖"} ${r.text}</div>`).join(""); return; }
     if (m.id !== reqId) return;
     if (!m.ok) { lastStats = null; clearPrev(); return setInfo("bad", "✖ " + m.error); }
     lastStats = m.stats; setPrev(m.dom, m.src); showEstimate();
+  }
+  function ensureWorker() {
+    if (!worker) { worker = new Worker(new URL("./voxelWorker.js", import.meta.url), { type: "module" }); worker.onmessage = onMsg; worker.postMessage({ type: "bench" }); }
+    return worker;
   }
   function run() {
     syncPart(); const st = getStart();
     if (!st) return setInfo("warn", "Tool start is not ready yet.");
     if (!curPart) return setInfo("warn", "Add a part in step 2 (Tool end) first.");
     if (!picked.size) { lastStats = null; clearPrev(); return setInfo("warn", "Click one or more faces of the tool end to choose where the connector attaches. They turn green."); }
-    if (!worker) {
-      worker = new Worker(new URL("./voxelWorker.js", import.meta.url), { type: "module" });
-      worker.onmessage = onMsg; worker.postMessage({ type: "bench" });
-    }
+    ensureWorker();
     const d = st.dims, R = S.conn === "partial" ? (d.spigotOuter ? d.spigotOuter / 2 : d.centreHole / 2 + d.thickness) : null;
     const a = startTris(st), b = endTris();
     setInfo("", "Computing design space…");

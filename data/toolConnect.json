@@ -9,6 +9,6 @@
       { "id": "partial", "label": "Partial (spigot area only)" }
     ]
   },
-  "estimate": { "cgIterationsPerStep": 30, "optimizationSteps": 80, "overheadFactor": 2.5, "greenBelowMinutes": 5, "yellowBelowMinutes": 15 },
-  "maxGridCells": 3000000
+   "estimate": { "cgIterationsPerStep": 60, "optimizationSteps": 80, "overheadFactor": 1.5, "greenBelowMinutes": 5, "yellowBelowMinutes": 15 },
+   "maxGridCells": 3000000
 }
