@@ -5,9 +5,10 @@ import { createFem } from "./fem.js";
 // P: nx, ny, nz, active (1 = element exists), passive (1 = fixed solid), fixedMask, force, vf (material fraction), rmin (filter radius in voxels), maxIter.
 // Refine only: x0 = start density per element (instead of vf). shrink = {tol, step, minFrac}: once the design settles, the material cap is lowered
 // by "step" while the stiffness stays within "tol" of the start design (compliance of the first step), down to minFrac of the first cap.
+// Print-ready only: am = {base (1 = cell rests on the bed), P, eps, start}: the additive manufacturing filter below is applied after the density filter.
 // onStep(info) may be async (lets the worker receive Stop). shouldStop() -> true to stop.
 export async function optimize(P, onStep, shouldStop) {
-  const { nx, ny, nz, active, passive, fixedMask, force, vf, rmin, maxIter, x0, shrink } = P;
+  const { nx, ny, nz, active, passive, fixedMask, force, vf, rmin, maxIter, x0, shrink, am } = P;
   const p = 3, Emin = 1e-3, move = 0.3, nel = nx * ny * nz;
   const fem = createFem({ nx, ny, nz, active, Emin, p });
   fem.setFixed(fixedMask);
@@ -38,10 +39,14 @@ export async function optimize(P, onStep, shouldStop) {
   }
 
   const x = new Float64Array(nel), rho = new Float64Array(nel);
-  for (let e = 0; e < nel; e++) x[e] = passive[e] ? 1 : active[e] ? (x0 ? x0[e] : vf) : 0;
+  // a grey start fades out layer by layer under the print filter, so it starts at am.start (the OC update brings the material down to the cap)
+  for (let e = 0; e < nel; e++) x[e] = passive[e] ? 1 : active[e] ? (x0 ? x0[e] : am ? Math.max(vf, am.start) : vf) : 0;
+  const amF = am ? createAm({ nx, ny, nz, active, passive, base: am.base, P: am.P, eps: am.eps }) : null;
+  const xi = amF ? new Float64Array(nel) : null, phys = xi || rho; // phys = the density the solver sees (the printed density in print-ready mode)
   const filter = () => {
     rho.set(x);
     for (let r = 0; r < nFree; r++) { let s = 0; for (let o = rowStart[r]; o < rowStart[r + 1]; o++) s += w[o] * x[cols[o]]; rho[list[r]] = s / sRow[r]; }
+    if (amF) amF.forward(rho, xi);
   };
   const u = new Float64Array(fem.ndof), ue = new Float64Array(nel), dc = new Float64Array(nFree), dcdx = new Float64Array(nFree), xn = new Float64Array(nFree);
   const Vcap = vf * nFree;
@@ -50,12 +55,13 @@ export async function optimize(P, onStep, shouldStop) {
   filter();
   for (let it = 1; it <= maxIter; it++) {
     if (shouldStop()) { stopped = true; break; }
-    fem.setDensity(rho);
+    fem.setDensity(phys);
     const s = fem.solve(force, u, it === 1 ? 1e-4 : 1e-3, it === 1 ? 500 : 60);
     fem.unitEnergy(u, ue);
     c = 0; for (let d = 0; d < fem.ndof; d++) c += force[d] * u[d];
     if (c0 === null) c0 = cRef = c;
-    for (let r = 0; r < nFree; r++) { const e = list[r]; dc[r] = -p * (1 - Emin) * Math.pow(rho[e], p - 1) * ue[e]; }
+    for (let r = 0; r < nFree; r++) { const e = list[r]; dc[r] = -p * (1 - Emin) * Math.pow(phys[e], p - 1) * ue[e]; }
+    if (amF) amF.chain(list, dc);
     dcdx.fill(0);
     for (let r = 0; r < nFree; r++) for (let o = rowStart[r]; o < rowStart[r + 1]; o++) { const fr = rowOf[cols[o]]; if (fr >= 0) dcdx[fr] += (w[o] / sRow[r]) * dc[r]; }
     let l1 = 0, l2 = 1e9, guard = 0;
@@ -70,7 +76,7 @@ export async function optimize(P, onStep, shouldStop) {
     change = 0; for (let r = 0; r < nFree; r++) { const e = list[r]; change = Math.max(change, Math.abs(xn[r] - x[e])); x[e] = xn[r]; }
     vol = vConst; for (let r = 0; r < nFree; r++) vol += dv[r] * x[list[r]]; vol /= nFree;
     filter(); steps = it;
-    await onStep({ it, maxIter, c, c0, vol, change, cg: s.iters, rho });
+    await onStep({ it, maxIter, c, c0, vol, change, cg: s.iters, rho: phys });
     since++;
     if (change < 0.02 && it >= 12 && (!shrink || since >= 8)) {
       if (shrink && c <= cRef * (1 + shrink.tol) && Vt * (1 - shrink.step) >= Vcap * shrink.minFrac) {
@@ -80,8 +86,64 @@ export async function optimize(P, onStep, shouldStop) {
     }
   }
   if (shrink && accepted && c > cRef * (1 + shrink.tol)) { x.set(accepted); filter(); c = accC; vol = accVol; } // the last shrink cost too much stiffness: go back
-  return { rho, c, c0: c0 ?? c, cRef: cRef ?? c, vol, it: steps, stopped, converged };
+  return { rho: phys, c, c0: c0 ?? c, cRef: cRef ?? c, vol, it: steps, stopped, converged };
 }
+// Additive manufacturing filter (written from Langelaar 2017, "An additive manufacturing filter for topology optimization of print-ready designs").
+// Build direction +Z. A cell can only be as solid as the cells that hold it up: the cell straight below and its 4 side neighbours one layer down
+// (= 45° overhang). printed = smin(design, smax(printed supports)). Cells on the bed are always held up. Passive cells are solid, inactive cells empty.
+function createAm({ nx, ny, nz, active, passive, base, P, eps }) {
+  const nel = nx * ny * nz, L = nx * ny, se = Math.sqrt(eps), ln05 = Math.log(0.5);
+  const a = new Float64Array(nel), b = new Float64Array(nel), sp = new Float64Array(nel), q = new Float64Array(nel), g = new Float64Array(nel);
+  let xi = null;
+  const sup = (e, fn) => { const k = Math.floor(e / L); if (k === 0) return; const i = e % nx, j = Math.floor(e / nx) % ny, d = e - L;
+    fn(d); if (i > 0) fn(d - 1); if (i < nx - 1) fn(d + 1); if (j > 0) fn(d - nx); if (j < ny - 1) fn(d + nx); };
+  const free = (e) => active[e] && !passive[e];
+  // cells are stored x fastest, then y, then z, so every cell of layer k-1 is done before layer k
+  function forward(rho, out) {
+    xi = out;
+    for (let e = 0; e < nel; e++) {
+      sp[e] = 0;
+      if (!active[e]) { xi[e] = 0; continue; }
+      if (passive[e]) { xi[e] = 1; continue; }
+      if (base[e]) { xi[e] = rho[e]; a[e] = 1; b[e] = 0; continue; }
+      let s = 0, n = 0; sup(e, (f) => { s += Math.pow(xi[f], P); n++; });
+      const Q = P + (n ? Math.log(n) / ln05 : 0); // smax is exact when every support is 0.5
+      const X = n && s > 1e-200 ? Math.pow(s, 1 / Q) : 0, d = rho[e] - X, r = Math.sqrt(d * d + eps);
+      xi[e] = 0.5 * (rho[e] + X - r + se); a[e] = 0.5 * (1 - d / r); b[e] = 0.5 * (1 + d / r); sp[e] = X ? s : 0; q[e] = Q;
+    }
+  }
+  // dc = d(compliance)/d(printed) per free row; turned into d(compliance)/d(design), top layer down (adjoint sweep)
+  function chain(list, dc) {
+    for (let r = 0; r < list.length; r++) g[list[r]] = dc[r];
+    for (let e = nel - 1; e >= 0; e--) {
+      if (!free(e)) continue;
+      if (sp[e] > 0) { const mu = g[e] * b[e] * (P / q[e]) * Math.pow(sp[e], 1 / q[e] - 1); sup(e, (f) => { if (free(f)) g[f] += mu * Math.pow(xi[f], P - 1); }); }
+      g[e] *= a[e];
+    }
+    for (let r = 0; r < list.length; r++) dc[r] = g[list[r]];
+  }
+  return { forward, chain };
+}
+
+// Print filter self-test: the filter slopes match a numerical check, and material above an empty layer is not printed.
+export function amSelfTest(P, eps) {
+  const nx = 3, ny = 3, nz = 4, nel = nx * ny * nz, active = new Uint8Array(nel).fill(1), passive = new Uint8Array(nel), base = new Uint8Array(nel);
+  for (let e = 0; e < nx * ny; e++) base[e] = 1;
+  const am = createAm({ nx, ny, nz, active, passive, base, P, eps }), rho = Float64Array.from({ length: nel }, (_, e) => 0.3 + 0.6 * Math.abs(Math.sin(e * 1.7)));
+  const wt = Float64Array.from({ length: nel }, (_, e) => 1 + (e % 5)), J = (r) => { const t = new Float64Array(nel); am.forward(r, t); return t.reduce((s, v, e) => s + wt[e] * v * v, 0); };
+  const xi = new Float64Array(nel); am.forward(rho, xi);
+  const list = [...Array(nel).keys()], dc = Float64Array.from(list, (e) => 2 * wt[e] * xi[e]); am.chain(list, dc);
+  let err = 0;
+  for (const e of [0, 10, 13, 22, 31]) { const r1 = Float64Array.from(rho), r2 = Float64Array.from(rho); r1[e] += 1e-6; r2[e] -= 1e-6; const fd = (J(r1) - J(r2)) / 2e-6; err = Math.max(err, Math.abs(fd - dc[e]) / Math.max(1e-9, Math.abs(fd))); }
+  const hang = new Float64Array(nel).fill(1); for (let e = nx * ny; e < 2 * nx * ny; e++) hang[e] = 0; // layer 1 empty: layers 2 and 3 have nothing below
+  const xh = new Float64Array(nel); am.forward(hang, xh);
+  const top = Math.max(...xh.slice(2 * nx * ny));
+  return [
+    { ok: err < 1e-4, text: `Print filter: slopes match a numerical check (error ${err.toExponential(1)})` },
+    { ok: top < 0.05, text: `Print filter: material above an empty layer is not printed (max ${top.toFixed(3)})` },
+  ];
+}
+
 // Refine self-test: a small cantilever is optimized, then re-run from its own result with the shrink rule.
 // Checks: the material never goes above the cap, and the stiffness stays within the tolerance of the start design.
 export async function refineSelfTest(tol, step, minFrac) {
