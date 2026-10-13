@@ -6,6 +6,7 @@ import { initFooterLinks } from './footerLinks.js';
 import { initToolEnd } from './toolEnd.js';
 import { initToolConnect } from './toolConnect.js';
 import { initObjectList } from './objectList.js';
+import { initExport } from './exportStage.js';
 
 const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
 const $ = (id) => document.getElementById(id);
@@ -139,4 +140,5 @@ refreshAll(); build();
 
 initFooterLinks(); 
 const toolEnd = initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers, list });
-initToolConnect({ scene, cam, renderer, $, toolEnd, getStart: () => startInfo, list });
+const toolConnect = initToolConnect({ scene, cam, renderer, $, toolEnd, getStart: () => startInfo, list });
+initExport({ worker, $, list, toolEnd, toolConnect, getStart: () => startInfo, getFlangeId: () => cur.flange.id });
