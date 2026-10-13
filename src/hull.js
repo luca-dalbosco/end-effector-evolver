@@ -17,7 +17,7 @@ export function convexHull(pts) {
   const [i0] = far((p) => -p[0]), [i1] = far((p) => len(sub(p, P[i0])));
   const d01 = sub(P[i1], P[i0]), [i2, e2] = far((p) => len(cross(d01, sub(p, P[i0]))) / len(d01));
   const n012 = cross(d01, sub(P[i2], P[i0])), [i3, e3] = far((p) => Math.abs(dot(n012, sub(p, P[i0]))) / len(n012));
-  if (e2 < eps * 10 || e3 < eps * 10) throw new Error("The flange face and the picked faces lie in one plane. Move the tool end away from the flange.");
+  if (e2 < eps * 10 || e3 < eps * 10) throw new Error("The flange face and the picked faces lie in one plane. Move the tool away from the flange.");
   let faces = [];
   const add = (a, b, c) => { const nn = cross(sub(P[b], P[a]), sub(P[c], P[a])), l = len(nn) || 1, nv = [nn[0] / l, nn[1] / l, nn[2] / l]; faces.push({ v: [a, b, c], n: nv, d: dot(nv, P[a]) }); };
   const above = (f, p) => dot(f.n, p) - f.d;
