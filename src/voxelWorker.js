@@ -2,7 +2,9 @@
 // Pure JavaScript, no geometry kernel. Units: mm.
 
 import { createFem, selfTest } from "./fem.js";
-import { optimize } from "./optimizer.js";
+import { optimize, refineSelfTest } from "./optimizer.js";
+import tc from "../data/toolConnect.json";
+const tcRefine = Object.fromEntries(Object.entries(tc.refine).map(([k, v]) => [k, v.default]));
 import { voxelizeSolid, connected, solidCentroid, nodalLoads } from "./voxelize.js";
 const BIG = 1e9;
 
@@ -173,7 +175,29 @@ function clearance() {
   }
   let islands = 0; for (let c = 0; c < N; c++) if (mask[c] && !seen[c]) { mask[c] = 0; islands++; }
   const connectedAB = reachedB;
+  S.cleared = mask;
   return { mesh: exposed(mask, nx, ny, nz, h, org), stats: { before, cut, islands, after: before - cut - islands, connected: connectedAB } };
+}
+
+// Refine: for a new (finer) grid, which cells lie inside the coarse material (mat) and which within bandMm of it (band).
+function refineMasks(r, nx, ny, nz, org, h) {
+  const { nx: cx, ny: cy, nz: cz, h: ch, org: co, mask, bandMm } = r, f = new Float32Array(cx * cy * cz);
+  for (let c = 0; c < f.length; c++) f[c] = mask[c] ? 0 : BIG;
+  edt(f, cx, cy, cz);
+  const lim = (bandMm / ch) ** 2, band = new Uint8Array(nx * ny * nz), mat = new Uint8Array(nx * ny * nz);
+  for (let z = 0; z < nz; z++) {
+    const k = Math.floor((org[2] + (z + 0.5) * h - co[2]) / ch); if (k < 0 || k >= cz) continue;
+    for (let y = 0; y < ny; y++) {
+      const j = Math.floor((org[1] + (y + 0.5) * h - co[1]) / ch); if (j < 0 || j >= cy) continue;
+      for (let x = 0; x < nx; x++) {
+        const i = Math.floor((org[0] + (x + 0.5) * h - co[0]) / ch); if (i < 0 || i >= cx) continue;
+        const c = i + cx * (j + cy * k), o = x + nx * (y + ny * z);
+        if (mask[c]) mat[o] = 1;
+        if (f[c] <= lim) band[o] = 1;
+      }
+    }
+  }
+  return { band, mat };
 }
 
 let state = null, running = false, stopFlag = false;
@@ -193,6 +217,7 @@ function compute(m) {
   const Lest = Math.hypot(ca[0] - cb[0], ca[1] - cb[1], ca[2] - cb[2]);
   const side = 0.5 * Math.sqrt((1 + m.band) ** 2 - 1) * Lest;
   const cog = solidCentroid(m.endAll);
+  if (!m.restrict) { const vbox = [0, 1, 2].reduce((p, a) => p * (hi[a] - lo[a] + 2 * side), 1); h = Math.max(h, Math.cbrt(vbox / (m.budget * 4))); } // analysis voxel comes from the voxel limit: start near it so the first pass is cheap
   let retried = false;
   for (;;) {
     const pad = side + 2 * h, org = lo.map((v) => v - pad), dim = hi.map((v, a) => Math.ceil((v + pad - org[a]) / h) + 1);
@@ -211,11 +236,12 @@ function compute(m) {
     const thr = best * (1 + m.band);
     const kS = voxelizeSolid(m.startAll, nx, ny, nz, org, h), kE = voxelizeSolid(m.endAll, nx, ny, nz, org, h);
     const free = new Uint8Array(N), vis = new Uint8Array(N), uni = new Uint8Array(N), lost = new Uint8Array(N), av = m.avoid?.length ? avoidMask(m.avoid, nx, ny, nz, org, h) : null, ko = m.keepOut ? keepOutMask(m.keepOut, nx, ny, nz, org, h) : null;
+    const rf = m.restrict ? refineMasks(m.restrict, nx, ny, nz, org, h) : null;
     let count = 0, nA = 0, nB = 0, nFree = 0, nAvoided = 0, avoidHitsSrc = false;
     for (let c = 0; c < N; c++) {
       if (srcA[c]) nA++; if (srcB[c]) nB++;
       if (srcA[c] || srcB[c]) { uni[c] = 1; vis[c] = 1; count++; if (av && av[c]) avoidHitsSrc = true; }
-      else if (!kS[c] && !kE[c] && Math.sqrt(fA[c]) + Math.sqrt(fB[c]) <= thr) {
+      else if (!kS[c] && !kE[c] && (!rf || rf.band[c]) && Math.sqrt(fA[c]) + Math.sqrt(fB[c]) <= thr) {
         if ((av && av[c]) || (ko && ko[c])) { lost[c] = 1; nAvoided++; continue; } // red: no voxel may grow here
         free[c] = 1; vis[c] = 1; count++; nFree++;
       }
@@ -223,11 +249,10 @@ function compute(m) {
     if (!connected(vis, srcA, srcB, nx, ny, nz)) throw new Error("The tool start, the tool end or a red zone (including Robot Avoidance) blocks the way between the surfaces. Make the red zones smaller (for example a lower robot offset) or increase the design space size.");
     if (count > m.budget * 1.1 && !retried) { retried = true; h *= Math.cbrt(count / m.budget) * 1.02; continue; }
     const fixed = new Uint8Array(N); for (let c = 0; c < N; c++) if (kS[c] || (ko && ko[c])) fixed[c] = 1;
-    state = { nx, ny, nz, h, org, srcA, srcB, free, cog, fixed, avoid: m.avoid || [] };
-    return {
-      stats: { h, dim, count, nFree, L: best * h, nA, nB, nAvoided, avoidHitsSrc, overBudget: count > m.budget * 1.1 },
-      dom: exposed(vis, nx, ny, nz, h, org), src: exposed(uni, nx, ny, nz, h, org), avoid: exposed(lost, nx, ny, nz, h, org),
-    };
+    state = { nx, ny, nz, h, org, srcA, srcB, free, cog, fixed, avoid: m.avoid || [], input: m, mat: rf ? rf.mat : null };
+    const stats = { h, dim, count, nFree, L: best * h, nA, nB, nAvoided, avoidHitsSrc, overBudget: count > m.budget * 1.1 };
+    if (rf) return { stats }; // refine: no preview meshes
+    return { stats, dom: exposed(vis, nx, ny, nz, h, org), src: exposed(uni, nx, ny, nz, h, org), avoid: exposed(lost, nx, ny, nz, h, org) };
   }
 }
 
@@ -255,15 +280,42 @@ async function runOptimize(m) {
   const meshOf = (rho) => { const mask = new Uint8Array(N); for (let c = 0; c < N; c++) if (active[c] && rho[c] > 0.5) mask[c] = 1; return exposed(mask, nx, ny, nz, h, org); };
   const bufs = (mesh) => [mesh.p.buffer, mesh.n.buffer, mesh.i.buffer];
   const t0 = performance.now();
-  const res = await optimize({ nx, ny, nz, active, passive, fixedMask, force, vf: m.vf, rmin: m.rmin, maxIter: m.maxIter }, async (s) => {
-    const msg = { type: "progress", id: m.id, it: s.it, maxIter: s.maxIter, c: s.c, c0: s.c0, vol: s.vol, change: s.change, cg: s.cg, elapsed: performance.now() - t0 };
+  let P = { nx, ny, nz, active, passive, fixedMask, force, vf: m.vf, rmin: m.rmin, maxIter: m.maxIter };
+  if (m.refine) { // start from the coarse design, keep the coarse volume as the cap, same filter radius in mm
+    const par = S.parent, nFreeCells = S.free.reduce((a, v) => a + v, 0);
+    let coarse = 0; for (let c = 0; c < par.cleared.length; c++) if (par.cleared[c] && par.free[c]) coarse++;
+    const x0 = new Float64Array(N); for (let c = 0; c < N; c++) x0[c] = S.mat[c] ? 1 : 0.01;
+    P = { ...P, vf: Math.min(1, (coarse * par.h ** 3) / (h ** 3 * nFreeCells)), rmin: m.rmin * par.h / h, x0, shrink: m.shrink };
+  }
+  const res = await optimize(P, async (s) => {
+    const msg = { type: "progress", refine: !!m.refine, cap: P.vf, id: m.id, it: s.it, maxIter: s.maxIter, c: s.c, c0: s.c0, vol: s.vol, change: s.change, cg: s.cg, elapsed: performance.now() - t0 };
     if (s.it % 2 === 1) msg.mesh = meshOf(s.rho);
     postMessage(msg, msg.mesh ? bufs(msg.mesh) : []);
     await new Promise((r) => setTimeout(r, 0)); // lets a Stop message arrive
   }, () => stopFlag);
-  S.result = res.rho; S.active = active;
+  S.result = res.rho; S.active = active; S.cleared = null;
+  if (m.refine) { // drop loose pieces and check the connection, as in the Clearance step
+    const r = clearance(), par = S.parent;
+    postMessage({ type: "done", refine: true, id: m.id, ok: true, it: res.it, c: res.c, c0: res.c0, vol: res.vol, stopped: res.stopped, converged: res.converged, elapsed: performance.now() - t0, mesh: r.mesh, stats: r.stats, h, hc: par.h, cap: P.vf, cRef: res.cRef }, bufs(r.mesh));
+    return;
+  }
   const mesh = meshOf(res.rho);
   postMessage({ type: "done", id: m.id, ok: true, it: res.it, c: res.c, c0: res.c0, vol: res.vol, stopped: res.stopped, converged: res.converged, elapsed: performance.now() - t0, mesh }, bufs(mesh));
+}
+
+// Coarse material after the last Generate or Clearance (connect-surface cells included).
+function coarseMask(S) { const mk = new Uint8Array(S.nx * S.ny * S.nz); for (let c = 0; c < mk.length; c++) if (S.active[c] && S.result[c] > 0.5) mk[c] = 1; return mk; }
+
+// Refine: new grid at the display voxel size, only in a band around the coarse material, then a second optimization from the coarse design.
+async function runRefine(m) {
+  const base = state?.parent || state;
+  if (!base?.result) throw new Error("Generate a design first.");
+  if (!base.cleared) base.cleared = coarseMask(base);
+  const r = compute({ ...base.input, h: m.h, budget: m.budget, maxCells: m.maxCells, restrict: { nx: base.nx, ny: base.ny, nz: base.nz, h: base.h, org: base.org, mask: base.cleared, bandMm: m.bandVoxels * base.h } });
+  if (state.h > base.h * 0.99) { state = base; throw new Error(`The refined voxel (${r.stats.h.toFixed(2)} mm) cannot get finer than the analysis voxel (${base.h.toFixed(2)} mm). Raise the refine voxel budget or reduce the design space.`); }
+  state.parent = base; state.input = base.input;
+  postMessage({ type: "refineInfo", id: m.id, stats: r.stats, hc: base.h });
+  await runOptimize({ ...m, refine: true });
 }
 
 onmessage = async (e) => {
@@ -271,7 +323,29 @@ onmessage = async (e) => {
   if (m.type === "stop") { stopFlag = true; return; }
   if (running) { if (m.type === "domain") postMessage({ type: "domain", id: m.id, ok: false, error: "A design is running. Press Stop first." }); return; }
   if (m.type === "bench") return postMessage({ type: "bench", secPerElem: bench() });
-  if (m.type === "selftest") return postMessage({ type: "selftest", results: selfTest() });
+  if (m.type === "selftest") {
+    running = true;
+    try {
+      postMessage({ type: "selftest", results: selfTest() });
+      const rf = tcRefine;
+      postMessage({ type: "selftest", more: true, results: await refineSelfTest(rf.stiffnessTolerance, rf.shrinkStep, rf.minVolumeFraction) });
+    } catch (err) { postMessage({ type: "selftest", more: true, results: [{ ok: false, text: "Self-test crashed: " + err.message }] }); }
+    finally { running = false; }
+    return;
+  }
+  if (m.type === "restore") { // back to the coarse result
+    if (!state?.parent) return postMessage({ type: "restored", ok: false, error: "There is no coarse result to go back to." });
+    state = state.parent;
+    if (!state.cleared) state.cleared = coarseMask(state);
+    const mesh = exposed(state.cleared, state.nx, state.ny, state.nz, state.h, state.org);
+    return postMessage({ type: "restored", ok: true, mesh }, [mesh.p.buffer, mesh.n.buffer, mesh.i.buffer]);
+  }
+  if (m.type === "refine") {
+    running = true; stopFlag = false;
+    try { await runRefine(m); } catch (err) { postMessage({ type: "done", refine: true, id: m.id, ok: false, error: err.message }); }
+    running = false;
+    return;
+  }
   if (m.type === "clearPreview") {
     if (!state) return;
     try { const r = clearZones(), mesh = exposed(r.ring, state.nx, state.ny, state.nz, state.h, state.org); postMessage({ type: "clearPreview", id: m.id, mesh }, [mesh.p.buffer, mesh.n.buffer, mesh.i.buffer]); } catch (err) { /* preview only */ }
@@ -290,6 +364,7 @@ onmessage = async (e) => {
     } catch (err) { postMessage({ type: "domain", id: m.id, ok: false, error: err.message }); }
   } else if (m.type === "optimize") {
     running = true; stopFlag = false;
+    if (state?.parent) state = state.parent; // a refined grid is never optimized again
     try { await runOptimize(m); } catch (err) { postMessage({ type: "done", id: m.id, ok: false, error: err.message }); }
     running = false;
   }

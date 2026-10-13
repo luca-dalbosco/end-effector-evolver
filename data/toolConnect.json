@@ -1,5 +1,5 @@
 {
-  "voxelSize": { "min": 0.5, "max": 2, "step": 0.1, "default": 1.5, "recommendedRange": [0.5, 2], "note": "Display and export voxel size. The analysis may use a coarser voxel to stay fast." },
+  "voxelSize": { "min": 0.5, "max": 2, "step": 0.1, "default": 1.5, "recommendedRange": [0.5, 2], "note": "Refined voxel size, used only by the Refine step (the first design uses a coarser voxel set by the voxel limit)." },
   "designSpace": { "min": 0.05, "max": 2, "step": 0.05, "default": 0.25, "recommendedRange": [0.1, 0.4], "note": "How far the connector may wander from the straight path, as a fraction of the gap between the surfaces." },
   "analysisVoxelBudget": { "min": 1000, "max": 200000, "step": 1000, "default": 6000, "recommendedRange": [3000, 40000], "note": "Maximum voxels in the design space. Fewer = much faster." },
   "quality": {
@@ -34,6 +34,16 @@
     "diameterMarginMm": 0.25,
     "diameterAdjustMm": { "min": -1, "max": 10, "step": 0.25, "default": 0, "recommendedRange": [0, 2], "note": "Added to the head clearance diameter of the tool start (Allen head + 0.25)." },
     "lengthAdjustMm": { "min": -1, "max": 50, "step": 0.25, "default": 0, "recommendedRange": [0, 5], "note": "Added to the head height + 0.25 of the tool start." }
+  },
+  "refine": {
+    "voxelBudget": { "min": 5000, "max": 200000, "step": 1000, "default": 40000, "note": "Maximum voxels in the refined grid. If it would be more, the refined voxel is made coarser automatically." },
+    "overheadFactor": 3,
+    "firstStepCgIterations": 500,
+    "bandVoxels": { "min": 0.5, "max": 4, "step": 0.5, "default": 1.5, "note": "How far (in analysis voxels) the refined design may grow around the existing material." },
+    "maxIterations": { "min": 10, "max": 300, "step": 10, "default": 60, "note": "The refined design stops earlier when it stops changing." },
+    "stiffnessTolerance": { "min": 0, "max": 0.2, "step": 0.01, "default": 0.02, "note": "The refined design may lose this share of stiffness (compared with the coarse design) in exchange for less material." },
+    "shrinkStep": { "min": 0.01, "max": 0.2, "step": 0.01, "default": 0.03, "note": "Share of the material cap removed per shrink round." },
+    "minVolumeFraction": { "min": 0.2, "max": 1, "step": 0.05, "default": 0.6, "note": "The material may not drop below this share of the coarse volume." }
   },
   "estimate": { "cgIterationsPerStep": 50, "overheadFactor": 1.5, "greenBelowMinutes": 5, "yellowBelowMinutes": 15 },
   "maxGridCells": 3000000
