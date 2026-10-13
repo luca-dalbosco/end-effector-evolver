@@ -7,7 +7,7 @@ import { initToolEnd } from './toolEnd.js';
 import { initToolConnect } from './toolConnect.js';
 import { initObjectList } from './objectList.js';
 import { initExport } from './exportStage.js';
-import { initAdvanced, initSteps } from './ui.js';
+import { initAdvanced, initSteps, section, help } from './ui.js';
 
 const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
 const $ = (id) => document.getElementById(id);
@@ -23,18 +23,20 @@ const refreshers = [];
 const g = () => cur.flange.geometry;
 
 // ---------- controls ----------
-function row(label, el, used = () => true, hidden = () => false) {
-  const d = document.createElement("div"); d.className = "row"; d.innerHTML = `<label>${label}</label>`; d.append(el); $("controls").append(d);
+let host = $("controls"); // rows go into the current section body
+const sec = (title, helpId, parent = $("controls")) => { const s = section(title, helpId); parent.append(s.box); host = s.body; };
+function row(label, el, used = () => true, hidden = () => false, helpId) {
+  const d = document.createElement("div"); d.className = "row"; d.innerHTML = `<label>${label}</label>`; if (helpId) d.firstChild.append(help(helpId)); d.append(el); host.append(d);
   refreshers.push(() => { d.classList.toggle("off", !used()); d.style.display = hidden() ? "none" : ""; });
 }
-function select(label, getOpts, get, set, used, optOk = () => true) {
+function select(label, getOpts, get, set, used, optOk = () => true, helpId) {
   const s = document.createElement("select");
   const fill = () => { const v = get(); s.innerHTML = ""; getOpts().forEach((o) => { const op = new Option(o.label ?? o, o.id ?? o); op.disabled = !optOk(o); s.add(op); }); s.value = v; };
   s.onchange = () => { set(s.value); refreshAll(); schedule(); };
-  row(label, s, used); refreshers.push(fill); return fill;
+  row(label, s, used, undefined, helpId); refreshers.push(fill); return fill;
 }
-function check(label, get, set, hidden) { const l = document.createElement("label"), c = document.createElement("input"); c.type = "checkbox"; c.onchange = () => { set(c.checked); refreshAll(); schedule(); }; l.append(c, " " + label); row("", l, () => true, hidden); refreshers.push(() => (c.checked = get())); }
-function slider(label, cfg, get, set, used = () => true, hidden = () => false) {
+function check(label, get, set, hidden, helpId) { const l = document.createElement("label"), c = document.createElement("input"); c.type = "checkbox"; c.onchange = () => { set(c.checked); refreshAll(); schedule(); }; l.append(c, " " + label); if (helpId) l.append(help(helpId)); row("", l, () => true, hidden); refreshers.push(() => (c.checked = get())); }
+function slider(label, cfg, get, set, used = () => true, hidden = () => false, helpId) {
   const r = document.createElement("input"), n = document.createElement("input"), box = document.createElement("div"), note = document.createElement("div");
   r.type = "range"; n.type = "number"; [r, n].forEach((x) => { x.min = cfg.min; x.max = cfg.max; x.step = cfg.step; });
   const rec = cfg.recommendedRange, bad = cfg.notRecommendedRange; note.className = "rec";
@@ -42,50 +44,56 @@ function slider(label, cfg, get, set, used = () => true, hidden = () => false) {
   box.append(r, n, note);
   r.oninput = () => { set(+r.value); refreshAll(); }; r.onchange = schedule;
   n.onchange = () => { let v = +n.value; if (isNaN(v)) return; if (!advanced) v = Math.min(cfg.max, Math.max(cfg.min, v)); set(v); refreshAll(); schedule(); };
-  row(label, box, used, hidden);
+  row(label, box, used, hidden, helpId);
   refreshers.push(() => { const v = get(); r.value = n.value = v; r.disabled = advanced;
     n.className = rec && v >= rec[0] && v <= rec[1] ? "ok" : (bad && v >= bad[0] && v <= bad[1]) || v < cfg.min || v > cfg.max ? "bad" : "warn"; });
 }
 const refreshAll = () => refreshers.forEach((f) => f());
 
 // robot menus: brand, then model
-const brands = () => [...new Set(flanges.map((f) => f.brand))];
+const ADD = { id: "__add", label: "+ Add custom flange…" };
+const brands = () => [...new Set(flanges.map((f) => f.brand)), ADD];
 const models = () => flanges.filter((f) => f.brand === cur.flange.brand);
-select("Brand", brands, () => cur.flange.brand, (v) => { cur.flange = flanges.find((f) => f.brand === v && ready(f)) ?? flanges.find((f) => f.brand === v); fixSettings(); }, undefined, (b) => flanges.some((f) => f.brand === b && ready(f)));
-select("Robot model", () => models().map((f) => ({ id: f.id, label: f.model + (ready(f) ? "" : " (data needed)") })), () => cur.flange.id,
-  (v) => { cur.flange = flanges.find((f) => f.id === v); fixSettings(); }, undefined, (o) => ready(flanges.find((f) => f.id === o.id)));
+sec("Robot");
+select("Brand", brands, () => cur.flange.brand, (v) => { if (v === ADD.id) return openForm(); cur.flange = flanges.find((f) => f.brand === v && ready(f)) ?? flanges.find((f) => f.brand === v); fixSettings(); }, undefined, (b) => b.id === ADD.id || flanges.some((f) => f.brand === b && ready(f)));
+select("Robot model", () => [...models().map((f) => ({ id: f.id, label: f.model + (ready(f) ? "" : " (data needed)") })), ADD], () => cur.flange.id,
+  (v) => { if (v === ADD.id) return openForm(); cur.flange = flanges.find((f) => f.id === v); fixSettings(); }, undefined, (o) => o.id === ADD.id || ready(flanges.find((f) => f.id === o.id)));
 function fixSettings() { if (settings.fitMode === "plate-spigot" && !g()?.centreHole) settings.fitMode = "plate"; if (settings.fitMode === "plate-spigot-collar" && !(g()?.centreHole && g()?.raisedSpigot)) settings.fitMode = "plate"; if (settings.fitMode === "plate") settings.dowelMode = "hole"; }
 const fitOk = (o) => o.id === "plate" || (!!g()?.centreHole && (o.id === "plate-spigot" || !!g()?.raisedSpigot));
-select("Fit mode", () => ts.fitMode.options, () => settings.fitMode, (v) => { settings.fitMode = v; fixSettings(); }, undefined, fitOk);
-select("Spigot", () => ts.spigotStyle.options, () => settings.spigotStyle, (v) => (settings.spigotStyle = v), () => settings.fitMode !== "plate");
+sec("Fit");
+select("Fit mode", () => ts.fitMode.options, () => settings.fitMode, (v) => { settings.fitMode = v; fixSettings(); }, undefined, fitOk, "fitMode");
+select("Spigot", () => ts.spigotStyle.options, () => settings.spigotStyle, (v) => (settings.spigotStyle = v), () => settings.fitMode !== "plate", undefined, "spigot");
 const hasPockets = () => settings.fitMode !== "plate" && !!(g()?.centreHole?.wallPockets || (settings.fitMode === "plate-spigot-collar" && g()?.raisedSpigot?.wallPockets));
-check("Wall keys (fit the flange pockets)", () => settings.wallKeys, (v) => (settings.wallKeys = v), () => !hasPockets());
-slider("Thickness (mm)", ts.thickness, () => settings.thickness, (v) => (settings.thickness = v));
-slider("Plate edge margin (mm)", ts.plateEdgeMargin, () => settings.plateMargin, (v) => (settings.plateMargin = v));
-select("Dowel", () => ts.dowel.mode.options, () => settings.dowelMode, (v) => (settings.dowelMode = v), () => !!g()?.locatingPin, (o) => !(o.id === "printedPin" && settings.fitMode === "plate"));
-select("Screw head seat", () => ts.screwClearance.headSeat.options, () => settings.headSeat, (v) => (settings.headSeat = v));
+check("Wall keys (fit the flange pockets)", () => settings.wallKeys, (v) => (settings.wallKeys = v), () => !hasPockets(), "wallKeys");
+slider("Thickness (mm)", ts.thickness, () => settings.thickness, (v) => (settings.thickness = v), undefined, undefined, "thickness");
+slider("Plate edge margin (mm)", ts.plateEdgeMargin, () => settings.plateMargin, (v) => (settings.plateMargin = v), undefined, undefined, "plateMargin");
+select("Dowel", () => ts.dowel.mode.options, () => settings.dowelMode, (v) => (settings.dowelMode = v), () => !!g()?.locatingPin, (o) => !(o.id === "printedPin" && settings.fitMode === "plate"), "dowel");
+select("Screw head seat", () => ts.screwClearance.headSeat.options, () => settings.headSeat, (v) => (settings.headSeat = v), undefined, undefined, "headSeat");
+sec("Tolerances", "tolerances");
 const T = (k, label, used) => slider(label, tolCfg[k], () => settings.tolerances[k], (v) => (settings.tolerances[k] = v), used);
 T("screwHole", "Screw hole tolerance (mm)");
 T("spigot", "Spigot tolerance (mm)", () => settings.fitMode !== "plate");
 T("collar", "Collar tolerance (mm)", () => settings.fitMode === "plate-spigot-collar");
 T("dowelHole", "Dowel hole tolerance (mm)", () => settings.dowelMode === "hole" && !!g()?.locatingPin);
 T("dowelPin", "Printed dowel tolerance (mm)", () => settings.dowelMode === "printedPin");
+sec("Finish & export", undefined, $("exportA"));
 check("Chamfer, faces toward the robot", () => settings.chamfer.robotFacing, (v) => (settings.chamfer.robotFacing = v));
 check("Chamfer, faces away from the robot", () => settings.chamfer.awayFacing, (v) => (settings.chamfer.awayFacing = v));
 slider("Chamfer size (mm)", ts.chamfer.size, () => settings.chamfer.size, (v) => (settings.chamfer.size = v), () => true, () => !advanced);
+const ex = document.createElement("div"); ex.className = "row"; ex.innerHTML = '<label>Export robot side</label><button data-f="step">STEP</button><button data-f="stl">STL</button><button data-f="3mf">3MF</button>'; host.append(ex);
 initAdvanced($("adv"));
 document.addEventListener("advanced", (e) => { if (e.detail.stage !== "A") return; advanced = e.detail.on; if (!advanced) settings.chamfer.size = ts.chamfer.size.default; refreshAll(); schedule(); });
 
 // ---------- local flange form ----------
-const fields = [["name", "Name (e.g. My robot)", "text"], ["pcd", "Pitch circle diameter", "number"], ["thread", "Screw thread", "M3,M4,M5,M6,M8,M10,M12"], ["threadDepth", "Thread depth", "number"],
+const fields = [["brand", "Brand (optional, e.g. KUKA)", "text"], ["name", "Model name (e.g. My robot)", "text"], ["pcd", "Pitch circle diameter", "number"], ["thread", "Screw thread", "M3,M4,M5,M6,M8,M10,M12"], ["threadDepth", "Thread depth", "number"],
   ["positions", "Number of hole positions on the circle", "number"], ["pinD", "Locating pin hole diameter (empty = no pin; it takes position 0)", "number?"], ["pinDepth", "Pin hole depth", "number?"],
   ["spigotD", "Raised spigot diameter (empty = none)", "number?"], ["spigotH", "Raised spigot height", "number?"], ["centreD", "Centre hole diameter (empty = none)", "number?"], ["centreDepth", "Centre hole depth", "number?"],
   ["outerD", "Flange outer diameter (needed when there is no raised spigot)", "number?"]];
 const dlg = document.createElement("dialog"); dlg.innerHTML = "<b>Create local robotic flange</b><div id='ff'></div><div id='fe' class='bad'></div><button id='fs'>Save</button><button id='fc'>Cancel</button>"; document.body.append(dlg);
 $("ff").innerHTML = fields.map(([k, l, t]) => `<label>${l}${t.includes(",") ? `<select id="f_${k}">${t.split(",").map((o) => `<option>${o}</option>`).join("")}</select>` : `<input id="f_${k}" type="${t.startsWith("number") ? "number" : "text"}" step="any">`}</label>`).join("");
 const fv = (k) => $("f_" + k).value, fn = (k) => (fv(k) === "" ? null : +fv(k));
-const addBtn = Object.assign(document.createElement("button"), { textContent: "Create local robotic flange" }); addBtn.onclick = () => dlg.showModal(); $("controls").append(addBtn);
-$("fc").onclick = () => dlg.close();
+function openForm() { $("fe").textContent = ""; dlg.showModal(); }
+$("fc").onclick = () => { dlg.close(); refreshAll(); };
 $("fs").onclick = () => {
   const pos = fn("positions"), pin = fn("pinD") != null, need = ["pcd", "threadDepth", "positions"].filter((k) => !(fn(k) > 0));
   if (!fv("name") || need.length || (!fn("spigotD") && !fn("outerD")) || (pin && !(fn("pinDepth") > 0)) || (fn("spigotD") && !(fn("spigotH") > 0)) || (fn("centreD") && !(fn("centreDepth") > 0)))
@@ -96,8 +104,8 @@ $("fs").onclick = () => {
   if (fn("spigotD")) geometry.raisedSpigot = { diameter: fn("spigotD"), height: fn("spigotH") };
   if (fn("centreD")) geometry.centreHole = { diameter: fn("centreD"), depth: fn("centreDepth") };
   if (fn("outerD")) geometry.outerDiameter = fn("outerD");
-  const f = { id: "custom-" + Date.now(), brand: "Custom", model: fv("name"), geometry }; flanges.push(f);
-  localStorage.setItem("customFlanges", JSON.stringify(flanges.filter((x) => x.brand === "Custom"))); cur.flange = f; fixSettings(); dlg.close(); refreshAll(); schedule();
+  const f = { id: "custom-" + Date.now(), brand: fv("brand").trim() ? fv("brand").trim() + " (Custom)" : "Custom", custom: true, model: fv("name"), geometry }; flanges.push(f);
+  localStorage.setItem("customFlanges", JSON.stringify(flanges.filter((x) => x.custom || x.brand === "Custom"))); cur.flange = f; fixSettings(); dlg.close(); refreshAll(); schedule();
 };
 
 // ---------- viewer ----------
