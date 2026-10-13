@@ -156,14 +156,9 @@ function clearZones() {
   return { blocked, ring };
 }
 
-// Deletes result voxels inside the zones (connect surfaces are kept), then drops pieces no longer attached to a connect surface.
-function clearance() {
-  const S = state, { nx, ny, nz, h, org } = S, N = nx * ny * nz;
-  if (!S.result) throw new Error("Generate a design first.");
-  const { blocked } = clearZones(), mask = new Uint8Array(N);
-  let before = 0, cut = 0;
-  for (let c = 0; c < N; c++) if (S.active[c] && S.result[c] > 0.5) { before++; if (blocked[c] && !S.srcA[c] && !S.srcB[c]) cut++; else mask[c] = 1; }
-  const seen = new Uint8Array(N), queue = new Int32Array(N); let qh = 0, qt = 0, reachedB = false;
+// Cells of mask (1/0) that touch a connect surface through face neighbours, and whether the tool end is among them.
+function reach(mask, S) {
+  const { nx, ny, nz } = S, N = nx * ny * nz, seen = new Uint8Array(N), queue = new Int32Array(N); let qh = 0, qt = 0, reachedB = false;
   for (let c = 0; c < N; c++) if (mask[c] && (S.srcA[c] || S.srcB[c])) { seen[c] = 1; queue[qt++] = c; }
   while (qh < qt) {
     const c = queue[qh++], x = c % nx, y = Math.floor(c / nx) % ny, z = Math.floor(c / (nx * ny));
@@ -173,10 +168,131 @@ function clearance() {
       const n = X + nx * (Y + ny * Z); if (!seen[n] && mask[n]) { seen[n] = 1; queue[qt++] = n; }
     }
   }
+  return { seen, reachedB };
+}
+
+// Deletes result voxels inside the zones (connect surfaces are kept), then drops pieces no longer attached to a connect surface.
+function clearance() {
+  const S = state, { nx, ny, nz, h, org } = S, N = nx * ny * nz;
+  if (!S.result) throw new Error("Generate a design first.");
+  const { blocked } = clearZones(), mask = new Uint8Array(N);
+  let before = 0, cut = 0;
+  for (let c = 0; c < N; c++) if (S.active[c] && S.result[c] > 0.5) { before++; if (blocked[c] && !S.srcA[c] && !S.srcB[c]) cut++; else mask[c] = 1; }
+  const { seen, reachedB } = reach(mask, S);
   let islands = 0; for (let c = 0; c < N; c++) if (mask[c] && !seen[c]) { mask[c] = 0; islands++; }
   const connectedAB = reachedB;
-  S.cleared = mask;
+  S.cleared = mask; S.smooth = null;
   return { mesh: exposed(mask, nx, ny, nz, h, org), stats: { before, cut, islands, after: before - cut - islands, connected: connectedAB } };
+}
+
+// ---------- Smoothing ----------
+// Smooth field: 0..1 per cell, 0.5 = the surface. Starts as the cleared voxels. Each pass blurs it, keeps the volume and pins the connect surfaces.
+// clamp: cells outside the grid copy the edge cell (for distance fields); otherwise they count as empty.
+function blur3(f, nx, ny, nz, clamp) {
+  const t = new Float32Array(f.length), st = [1, nx, nx * ny], n = [nx, ny, nz];
+  for (let a = 0; a < 3; a++) {
+    const s = st[a], len = n[a];
+    for (let c = 0; c < f.length; c++) {
+      const q = Math.floor(c / s) % len, v = f[c];
+      t[c] = 0.25 * (q > 0 ? f[c - s] : clamp ? v : 0) + 0.5 * v + 0.25 * (q < len - 1 ? f[c + s] : clamp ? v : 0);
+    }
+    f.set(t);
+  }
+}
+
+// Shifts the field so that about `target` cells stay above 0.5 (blurring alone would shrink the part).
+function holdVolume(f, target) {
+  const B = 2048, hist = new Uint32Array(B + 1);
+  for (let c = 0; c < f.length; c++) hist[Math.min(B, Math.max(0, Math.floor(f[c] * B)))]++;
+  let cum = 0, b = B; for (; b > 0; b--) { cum += hist[b]; if (cum >= target) break; }
+  const d = 0.5 - b / B + 0.5 / B;
+  for (let c = 0; c < f.length; c++) f[c] = Math.min(1, Math.max(0, f[c] + d));
+}
+
+// Surface mesh of the 0.5 level (naive surface nets): one vertex per cell the surface crosses, one quad per crossed edge.
+function surfaceNets(f, nx, ny, nz, h, org) {
+  const iso = 0.5, mx = nx + 1, my = ny + 1, vid = new Int32Array(mx * my * (nz + 1)).fill(-1), v = new Float32Array(8);
+  const val = (x, y, z) => (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz ? 0 : f[x + nx * (y + ny * z)]);
+  const EDGES = []; for (let a = 0; a < 8; a++) for (let k = 0; k < 3; k++) if (!(a & (1 << k))) EDGES.push([a, a | (1 << k)]);
+  const pos = [], nor = [];
+  for (let z = -1; z < nz; z++) for (let y = -1; y < ny; y++) for (let x = -1; x < nx; x++) {
+    let mask = 0;
+    for (let k = 0; k < 8; k++) { v[k] = val(x + (k & 1), y + ((k >> 1) & 1), z + (k >> 2)); if (v[k] > iso) mask |= 1 << k; }
+    if (mask === 0 || mask === 255) continue;
+    let sx = 0, sy = 0, sz = 0, n = 0;
+    for (const [a, b] of EDGES) {
+      if (((mask >> a) & 1) === ((mask >> b) & 1)) continue;
+      const t = (iso - v[a]) / (v[b] - v[a]);
+      sx += (a & 1) + ((b & 1) - (a & 1)) * t; sy += ((a >> 1) & 1) + (((b >> 1) & 1) - ((a >> 1) & 1)) * t; sz += (a >> 2) + ((b >> 2) - (a >> 2)) * t; n++;
+    }
+    const gx = v[1] - v[0] + v[3] - v[2] + v[5] - v[4] + v[7] - v[6], gy = v[2] - v[0] + v[3] - v[1] + v[6] - v[4] + v[7] - v[5], gz = v[4] - v[0] + v[5] - v[1] + v[6] - v[2] + v[7] - v[3];
+    const gl = Math.hypot(gx, gy, gz) || 1;
+    vid[x + 1 + mx * (y + 1 + my * (z + 1))] = pos.length / 3;
+    pos.push(org[0] + (x + 0.5 + sx / n) * h, org[1] + (y + 0.5 + sy / n) * h, org[2] + (z + 0.5 + sz / n) * h);
+    nor.push(-gx / gl, -gy / gl, -gz / gl); // the field grows inward, so the outward normal is minus its gradient
+  }
+  const idx = [], q = [0, 0, 0];
+  for (let z = -1; z < nz; z++) for (let y = -1; y < ny; y++) for (let x = -1; x < nx; x++) {
+    const s0 = val(x, y, z) > iso;
+    for (let a = 0; a < 3; a++) {
+      if (s0 === (val(x + (a === 0), y + (a === 1), z + (a === 2)) > iso)) continue;
+      const u = (a + 1) % 3, w = (a + 2) % 3;
+      const at = (du, dw) => { q[0] = x; q[1] = y; q[2] = z; q[u] += du; q[w] += dw; return vid[q[0] + 1 + mx * (q[1] + 1 + my * (q[2] + 1))]; };
+      const A = at(-1, -1), B = at(0, -1), C = at(0, 0), E = at(-1, 0);
+      if (A < 0 || B < 0 || C < 0 || E < 0) continue;
+      if (s0) idx.push(A, B, C, A, C, E); else idx.push(A, C, B, A, E, C);
+    }
+  }
+  return { p: Float32Array.from(pos), n: Float32Array.from(nor), i: Uint32Array.from(idx) };
+}
+
+// Smooth field of the current result (made on the first use after a Generate, Clearance or Refine).
+function smoothField(S) {
+  if (!S.result) throw new Error("Generate a design first.");
+  if (!S.smooth) { const mk = S.cleared || coarseMask(S), f = new Float32Array(mk.length); for (let c = 0; c < f.length; c++) f[c] = mk[c]; S.smooth = { f }; }
+  return S.smooth.f;
+}
+
+// Drops smooth material that no longer touches a connect surface (value to 0). Returns the loose cell count and the connection state.
+function smoothIslands(S, f) {
+  const m = new Uint8Array(f.length); for (let c = 0; c < f.length; c++) if (f[c] > 0.5) m[c] = 1;
+  const { seen, reachedB } = reach(m, S); let islands = 0;
+  for (let c = 0; c < f.length; c++) if (m[c] && !seen[c]) { f[c] = 0; islands++; }
+  return { islands, connected: reachedB };
+}
+
+function smoothReply(S, f, extra) {
+  let cells = 0; for (let c = 0; c < f.length; c++) if (f[c] > 0.5) cells++;
+  const mesh = surfaceNets(f, S.nx, S.ny, S.nz, S.h, S.org);
+  return { mesh, stats: { volCm3: (cells * S.h ** 3) / 1000, tris: mesh.i.length / 3, ...extra } };
+}
+
+// One smoothing click: `passes` blurs, same volume, connect surfaces stay put.
+function smoothing(passes) {
+  const S = state, f = smoothField(S);
+  let before = 0; for (let c = 0; c < f.length; c++) if (f[c] > 0.5) before++;
+  for (let r = 0; r < passes; r++) blur3(f, S.nx, S.ny, S.nz, false);
+  holdVolume(f, before);
+  for (let c = 0; c < f.length; c++) if (S.srcA[c] || S.srcB[c]) f[c] = 1;
+  return smoothReply(S, f, smoothIslands(S, f));
+}
+
+// Boolean difference: cuts the smooth shape with the clearance zones (signed distance to the zones, a little rounded). Connect surfaces stay.
+function smoothClearance() {
+  const S = state, f = smoothField(S), { nx, ny, nz } = S, N = f.length, { blocked } = clearZones();
+  const out = new Float32Array(N), inn = new Float32Array(N);
+  for (let c = 0; c < N; c++) { out[c] = blocked[c] ? 0 : BIG; inn[c] = blocked[c] ? BIG : 0; }
+  edt(out, nx, ny, nz); edt(inn, nx, ny, nz);
+  const d = new Float32Array(N); // in voxels, positive outside the zones, zero on the zone surface
+  for (let c = 0; c < N; c++) d[c] = blocked[c] ? -(Math.sqrt(inn[c]) - 0.5) : Math.sqrt(out[c]) - 0.5;
+  blur3(d, nx, ny, nz, true); blur3(d, nx, ny, nz, true); // rounds the voxel steps of the zone surface
+  let cut = 0;
+  for (let c = 0; c < N; c++) {
+    if (S.srcA[c] || S.srcB[c]) continue;
+    const lim = Math.min(0.5, Math.max(-0.5, 0.25 * d[c])) + 0.5; // 0.5 on the zone surface, a 4 voxel ramp
+    if (f[c] > lim) { if (f[c] > 0.5 && lim <= 0.5) cut++; f[c] = lim; }
+  }
+  return smoothReply(S, f, { cut, ...smoothIslands(S, f) });
 }
 
 // Refine: for a new (finer) grid, which cells lie inside the coarse material (mat) and which within bandMm of it (band).
@@ -293,7 +409,7 @@ async function runOptimize(m) {
     postMessage(msg, msg.mesh ? bufs(msg.mesh) : []);
     await new Promise((r) => setTimeout(r, 0)); // lets a Stop message arrive
   }, () => stopFlag);
-  S.result = res.rho; S.active = active; S.cleared = null;
+  S.result = res.rho; S.active = active; S.cleared = null; S.smooth = null;
   if (m.refine) { // drop loose pieces and check the connection, as in the Clearance step
     const r = clearance(), par = S.parent;
     postMessage({ type: "done", refine: true, id: m.id, ok: true, it: res.it, c: res.c, c0: res.c0, vol: res.vol, stopped: res.stopped, converged: res.converged, elapsed: performance.now() - t0, mesh: r.mesh, stats: r.stats, h, hc: par.h, cap: P.vf, cRef: res.cRef }, bufs(r.mesh));
@@ -335,7 +451,7 @@ onmessage = async (e) => {
   }
   if (m.type === "restore") { // back to the coarse result
     if (!state?.parent) return postMessage({ type: "restored", ok: false, error: "There is no coarse result to go back to." });
-    state = state.parent;
+    state = state.parent; state.smooth = null;
     if (!state.cleared) state.cleared = coarseMask(state);
     const mesh = exposed(state.cleared, state.nx, state.ny, state.nz, state.h, state.org);
     return postMessage({ type: "restored", ok: true, mesh }, [mesh.p.buffer, mesh.n.buffer, mesh.i.buffer]);
@@ -344,6 +460,15 @@ onmessage = async (e) => {
     running = true; stopFlag = false;
     try { await runRefine(m); } catch (err) { postMessage({ type: "done", refine: true, id: m.id, ok: false, error: err.message }); }
     running = false;
+    return;
+  }
+  if (m.type === "smooth" || m.type === "smoothClear" || m.type === "smoothReset") {
+    if (!state) return;
+    try {
+      if (m.type === "smoothReset") { state.smooth = null; const mk = state.cleared || coarseMask(state), mesh = exposed(mk, state.nx, state.ny, state.nz, state.h, state.org); return postMessage({ type: "smoothed", id: m.id, ok: true, reset: true, mesh, stats: {} }, [mesh.p.buffer, mesh.n.buffer, mesh.i.buffer]); }
+      const r = m.type === "smooth" ? smoothing(m.passes) : smoothClearance();
+      postMessage({ type: "smoothed", id: m.id, ok: true, op: m.type, mesh: r.mesh, stats: r.stats }, [r.mesh.p.buffer, r.mesh.n.buffer, r.mesh.i.buffer]);
+    } catch (err) { postMessage({ type: "smoothed", id: m.id, ok: false, error: err.message }); }
     return;
   }
   if (m.type === "clearPreview") {
