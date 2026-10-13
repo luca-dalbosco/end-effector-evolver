@@ -7,7 +7,12 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const ADV = { budget: tc.analysisVoxelBudget.default, rmin: tc.filterRadius.default, iters: tc.maxIterations.default, mass: tc.payloadMassKg.default, accel: tc.accelFactor.default, gdir: tc.gravityDirection.default, fx: 0, fy: 0, fz: 0 };
   const S = { conn: tc.toolStartConnection.default, h: tc.voxelSize.default, band: tc.designSpace.default, vf: tc.volumeFraction.default, bd: tc.bolt.diameterAdjustMm.default, bl: tc.bolt.lengthAdjustMm.default, ...ADV };
   let advanced = false, active = false, running = false, worker = null, reqId = 0, optId = 0, timer = null, secPerElem = null, lastStats = null, tStart = 0;
-  let curPart = null, hl = null, prev = [], result = null, ghost = null, gid = 0, canClear = false;
+  let curPart = null, hl = null, prev = [], result = null, ghost = null, gid = 0, canClear = false, refined = false, coarseGhost = null, predGen = null, predRef = null;
+  // time estimate = measured matrix speed × work × a factor; the factor is learned from the last finished run on this computer
+  const calib = { gen: 1, ref: 1 };
+  try { Object.assign(calib, JSON.parse(localStorage.getItem("connCalib") || "{}")); } catch (e) { /* no storage */ }
+  const learn = (key, actualMs, predMs) => { if (!(predMs > 0)) return; calib[key] = Math.min(20, Math.max(0.2, actualMs / predMs)); try { localStorage.setItem("connCalib", JSON.stringify(calib)); } catch (e) { /* ignore */ } };
+  const refWork = (count, its) => count * (tc.estimate.cgIterationsPerStep * its + tc.refine.firstStepCgIterations) * tc.refine.overheadFactor; // × secPerElem × 1000 = ms before learning
   const picked = new Set();
   const robot = { mm: tc.avoid.robotOffsetMm.default }; // "Robot Avoidance": offset of the always-red cylinder below the tool start
   const avoid = []; // red items: { key, kind: "obj" | "face", it (list row), obj (its 3D group), fi (face), mm, ov (red overlay) }
@@ -114,20 +119,19 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   document.addEventListener("startbuilt", () => { drawRobot(); if (active) schedule(); });
   drawRobot();
 
-  function numRow(label, cfg, key, hidden = () => false) {
+  function numRow(label, cfg, key, hidden = () => false, rerun = true) {
     const d = document.createElement("div"); d.className = "row";
     const l = Object.assign(document.createElement("label"), { textContent: label });
     const r = Object.assign(document.createElement("input"), { type: "range", min: cfg.min, max: cfg.max, step: cfg.step });
     const n = Object.assign(document.createElement("input"), { type: "number", step: cfg.step });
     const note = document.createElement("div"); note.className = "rec";
     const rec = cfg.recommendedRange; note.textContent = (rec ? `recommended ${rec[0]} to ${rec[1]}. ` : "") + (cfg.note ?? "");
-    r.oninput = () => { S[key] = +r.value; sync(); }; r.onchange = schedule;
-    n.onchange = () => { let v = +n.value; if (n.value === "" || isNaN(v)) return; if (!advanced) v = clamp(v, cfg); S[key] = v; sync(); schedule(); };
+    r.oninput = () => { S[key] = +r.value; sync(); }; r.onchange = () => rerun && schedule();
+    n.onchange = () => { let v = +n.value; if (n.value === "" || isNaN(v)) return; if (!advanced) v = clamp(v, cfg); S[key] = v; sync(); if (rerun) schedule(); };
     d.append(l, r, n, note); panel.append(d);
     refreshers.push(() => { r.value = n.value = S[key]; d.style.display = hidden() ? "none" : ""; n.className = rec ? (S[key] >= rec[0] && S[key] <= rec[1] ? "ok" : "warn") : ""; });
   }
   head("Voxels");
-  numRow("Voxel size (mm)", tc.voxelSize, "h");
   numRow("Design space size", tc.designSpace, "band");
   numRow("Max analysis voxels", tc.analysisVoxelBudget, "budget", () => !advanced);
   head("Design");
@@ -166,6 +170,20 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const bClear = btn("Apply clearance", () => applyClearance()), clrOut = document.createElement("div"); clrOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
   bClear.disabled = true; panel.append(clrNote, bClear, clrOut);
   refreshers.push(() => { bClear.disabled = running || !canClear; });
+
+  head("Refine");
+  numRow("Refined voxel size (mm)", tc.voxelSize, "h", () => false, false);
+  const rfNote = document.createElement("div"); rfNote.className = "rec";
+  rfNote.textContent = "Runs the design again on a finer grid (the voxel size above), only around the existing material. Red zones are cut again at the finer size. It may use a little less material if the stiffness stays almost the same. The coarse result is kept.";
+  const bRefine = btn("Refine to voxel size", () => refine()), bBack = btn("Back to coarse result", () => { if (worker) { refOut.textContent = "Going back…"; worker.postMessage({ type: "restore" }); } });
+  const rfBar = Object.assign(document.createElement("progress"), { max: 1, value: 0 }); rfBar.style.cssText = "width:100%;margin-top:6px";
+  const rfHint = document.createElement("div"), refOut = document.createElement("div"); rfHint.className = "rec"; refOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
+  panel.append(rfNote, bRefine, bBack, rfBar, rfHint, refOut);
+  const canRefine = () => canClear && lastStats && lastStats.h > S.h * 1.001;
+  refreshers.push(() => {
+    bRefine.disabled = running || !canRefine(); bBack.disabled = running || !refined;
+    rfHint.textContent = !lastStats || !canClear ? "Generate a design first." : canRefine() ? `Analysis voxel ${lastStats.h.toFixed(2)} mm → refined voxel ${S.h} mm.` : "The analysis voxel is already as fine as the voxel size. Lower the voxel size (Voxels) to refine.";
+  });
 
   const selfBox = document.createElement("div"), selfOut = document.createElement("div"); selfOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
   selfBox.append(btn("Run solver self-test", () => { selfOut.textContent = "Running…"; ensureWorker().postMessage({ type: "selftest" }); }), selfOut); panel.append(selfBox);
@@ -298,23 +316,25 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   };
   function clearGhost() { if (ghost) { scene.remove(ghost); ghost.geometry.dispose(); ghost = null; } }
   function clearPrev() { prev.forEach((m) => { scene.remove(m); m.geometry.dispose(); }); prev = []; clearGhost(); }
+  const ghostCoarseMat = new THREE.MeshStandardMaterial({ color: 0x4a7fb5, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide });
+  function clearCoarseGhost() { if (coarseGhost) { scene.remove(coarseGhost); coarseGhost.geometry.dispose(); coarseGhost = null; } }
   function clearResult() { canClear = false; clrOut.textContent = ""; if (result) { scene.remove(result); result.geometry.dispose(); result = null; } }
   const ghostMat = new THREE.MeshStandardMaterial({ color: 0xff9800, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide });
   function ghostPreview() { if (worker && lastStats && !running) worker.postMessage({ type: "clearPreview", id: ++gid }); }
   function applyClearance() { if (!worker || !canClear) return; clrOut.textContent = "Clearing…"; worker.postMessage({ type: "clear" }); }
-  function setPrev(d, s, a) { clearPrev(); clearResult(); prev = [meshOf(d, domMat), meshOf(s, srcMat)]; if (a && a.i.length) prev.push(meshOf(a, avoidMat)); }
+  function setPrev(d, s, a) { refined = false; refOut.textContent = ""; clearCoarseGhost(); clearPrev(); clearResult(); prev = [meshOf(d, domMat), meshOf(s, srcMat)]; if (a && a.i.length) prev.push(meshOf(a, avoidMat)); }
   const showResult = (d) => { clearResult(); result = meshOf(d, resMat); };
 
   function showEstimate() {
     if (!lastStats) return;
     const s = lastStats, e = tc.estimate;
-    const min = secPerElem == null ? null : (s.count * e.cgIterationsPerStep * S.iters * secPerElem * e.overheadFactor) / 60;
+    const min = secPerElem == null ? null : (s.count * e.cgIterationsPerStep * S.iters * secPerElem * e.overheadFactor * calib.gen) / 60;
     const cls = min == null ? "" : min < e.greenBelowMinutes ? "ok" : min < e.yellowBelowMinutes ? "warn" : "bad";
     const time = min == null ? "measuring this computer…" : `about ${min < 1 ? "under 1" : min.toFixed(min < 10 ? 1 : 0)} min (rough estimate)`;
     setInfo("", [
       `Gap between the surfaces: ${s.L.toFixed(1)} mm`,
       `Design voxels: ${s.count.toLocaleString()} (grid ${s.dim.join(" × ")})`,
-      `Analysis voxel: ${s.h.toFixed(2)} mm` + (s.h > S.h * 1.001 ? ` (coarser than your ${S.h} mm so the design stays fast)` : ""),
+      `Analysis voxel: ${s.h.toFixed(2)} mm (set by the voxel limit; use Refine for a finer result)`,
       `<span class="${cls}">Estimated design time: ${time}</span>`,
       cls === "bad" ? `<span class="bad">⚠ This will be slow. Try smaller faces, a smaller design space or a larger voxel size.</span>` : "",
       avoid.length || s.nAvoided ? `<span class="${s.avoidHitsSrc ? "warn" : ""}">Avoided: ${s.nAvoided.toLocaleString()} voxels taken out of the design space (red)</span>` + (s.avoidHitsSrc ? "<br>⚠ An avoided zone touches a connect surface. The surface voxels were kept." : "") : "",
@@ -325,7 +345,46 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   function onMsg(e) {
     const m = e.data;
     if (m.type === "bench") { secPerElem = m.secPerElem; return showEstimate(); }
-    if (m.type === "selftest") { selfOut.innerHTML = m.results.map((r) => `<div class="${r.ok === null ? "" : r.ok ? "ok" : "bad"}">${r.ok === null ? "ℹ" : r.ok ? "✔" : "✖"} ${r.text}</div>`).join(""); return; }
+    if (m.type === "refineInfo") {
+      if (m.id !== optId) return;
+      const s = m.stats, e = tc.estimate, its = tc.refine.maxIterations.default;
+      predRef = { count: s.count };
+      const min = secPerElem == null ? null : (refWork(s.count, its) * secPerElem * calib.ref) / 60;
+      const cls = min == null ? "" : min < e.greenBelowMinutes ? "ok" : min < e.yellowBelowMinutes ? "warn" : "bad";
+      refOut.innerHTML = [
+        `Refined voxel: ${s.h.toFixed(2)} mm` + (s.h > S.h * 1.001 ? ` (coarser than your ${S.h} mm so it fits the voxel budget)` : ""),
+        `Voxels: ${s.count.toLocaleString()} (grid ${s.dim.join(" × ")})`,
+        min == null ? "" : `<span class="${cls}">Estimated time: about ${min < 1 ? "under 1" : min.toFixed(min < 10 ? 1 : 0)} min (at most, rough)${calib.ref === 1 ? ". It gets more accurate after your first refine." : ""}</span>`,
+        s.overBudget ? `<span class="warn">⚠ Could not get under the voxel budget. This may be slow.</span>` : "",
+      ].filter(Boolean).join("<br>");
+      return;
+    }
+    if (m.type === "restored") {
+      if (!m.ok) { refOut.innerHTML = `<span class="bad">✖ ${m.error}</span>`; return; }
+      clearCoarseGhost(); showResult(m.mesh); canClear = true; refined = false; refOut.innerHTML = `<span class="ok">Back to the coarse result.</span>`; sync();
+      return;
+    }
+    if (m.refine && m.type === "progress") {
+      if (m.id !== optId) return;
+      rfBar.value = m.it / m.maxIter;
+      refOut.querySelector(".rprog")?.remove();
+      const p = Object.assign(document.createElement("div"), { className: "rprog" }); p.style.marginTop = "4px";
+      p.textContent = `Step ${m.it}/${m.maxIter} · ${(m.c0 / m.c).toFixed(2)}× the stiffness of the coarse design · material ${((m.vol / m.cap) * 100).toFixed(0)}% of the coarse volume · ${fmt(m.elapsed)} elapsed, about ${fmt((m.elapsed / m.it) * (m.maxIter - m.it))} left at most`;
+      refOut.append(p);
+      if (m.mesh) showResult(m.mesh);
+      return;
+    }
+    if (m.refine && m.type === "done") {
+      if (m.id !== optId) return;
+      setLock(false);
+      if (!m.ok) { refOut.innerHTML = `<span class="bad">✖ ${m.error}</span>`; if (coarseGhost && !result) { result = coarseGhost; result.material = resMat; coarseGhost = null; } return; }
+      if (!m.stopped && predRef && secPerElem != null) learn("ref", m.elapsed, refWork(predRef.count, m.it) * secPerElem * 1000);
+      showResult(m.mesh); canClear = true; refined = true; rfBar.value = m.stopped ? rfBar.value : 1; sync();
+      const t = m.stats;
+      refOut.innerHTML = `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔" : "⚠ The tool start and the tool end are no longer connected."} ${m.stopped ? "Stopped" : m.converged ? "Finished" : "Finished (step limit)"} after ${m.it} steps in ${fmt(m.elapsed)}. Voxel ${m.h.toFixed(2)} mm (analysis was ${m.hc.toFixed(2)} mm).<br>Stiffness: ${(m.c0 / m.c).toFixed(2)}× the coarse design. Material: ${((m.vol / m.cap) * 100).toFixed(0)}% of the coarse volume. ${t.islands.toLocaleString()} loose voxels dropped.</span>`;
+      return;
+    }
+    if (m.type === "selftest") { selfOut.innerHTML = (m.more ? selfOut.innerHTML : "") + m.results.map((r) => `<div class="${r.ok === null ? "" : r.ok ? "ok" : "bad"}">${r.ok === null ? "ℹ" : r.ok ? "✔" : "✖"} ${r.text}</div>`).join(""); return; }
     if (m.type === "clearPreview") { if (m.id === gid) { clearGhost(); if (m.mesh.i.length) ghost = meshOf(m.mesh, ghostMat); } return; }
     if (m.type === "cleared") {
       if (!m.ok) { clrOut.innerHTML = `<span class="bad">✖ ${m.error}</span>`; return; }
@@ -346,6 +405,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
       setLock(false);
       if (!m.ok) { prev.forEach((x) => (x.visible = active)); prog.innerHTML = `<span class="bad">✖ ${m.error}</span>`; return; }
       showResult(m.mesh); canClear = true; sync(); bar.value = m.stopped ? bar.value : 1;
+      if (!m.stopped && secPerElem != null) learn("gen", m.elapsed, predGen * (m.it / S.iters) * secPerElem * 1000);
       prog.innerHTML = `<span class="ok">${m.stopped ? "Stopped" : m.converged ? "Finished (stopped changing)" : "Finished (step limit)"} after ${m.it} steps in ${fmt(m.elapsed)}: ${(m.c0 / m.c).toFixed(1)}× stiffer than the start, material ${(m.vol * 100).toFixed(0)}% of the design space.</span>`;
       return;
     }
@@ -366,17 +426,26 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     const d = st.dims, R = S.conn === "partial" ? (d.spigotOuter ? d.spigotOuter / 2 : d.centreHole / 2 + d.thickness) : null;
     const a = startTris(st, false), b = endTris(false), sa = startTris(st, true), ea = endTris(true), av = avoidData(), ko = keepOut();
     setInfo("", "Computing design space…");
-    worker.postMessage({ type: "domain", id: ++reqId, h: S.h, band: S.band, budget: S.budget, maxCells: tc.maxGridCells, R, startTris: a, endTris: b, startAll: sa, endAll: ea, avoid: av.items, keepOut: ko }, [a.buffer, b.buffer, sa.buffer, ea.buffer, ...av.tr]);
+    worker.postMessage({ type: "domain", id: ++reqId, h: tc.voxelSize.min, band: S.band, budget: S.budget, maxCells: tc.maxGridCells, R, startTris: a, endTris: b, startAll: sa, endAll: ea, avoid: av.items, keepOut: ko }, [a.buffer, b.buffer, sa.buffer, ea.buffer, ...av.tr]);
+  }
+  function refine() {
+    if (!worker || !canRefine()) return;
+    const r = tc.refine, d = (k) => r[k].default;
+    if (result) { clearCoarseGhost(); coarseGhost = result; coarseGhost.material = ghostCoarseMat; result = null; } // the coarse result stays visible as a transparent ghost
+    setLock(true); rfBar.value = 0; refOut.textContent = "Preparing the finer grid…";
+    worker.postMessage({ type: "refine", id: ++optId, h: S.h, budget: d("voxelBudget"), maxCells: tc.maxGridCells, bandVoxels: d("bandVoxels"), rmin: S.rmin, maxIter: d("maxIterations"), mass: S.mass, accel: S.accel, gdir: S.gdir, extra: [S.fx, S.fy, S.fz], shrink: { tol: d("stiffnessTolerance"), step: d("shrinkStep"), minFrac: d("minVolumeFraction") } });
   }
   function generate() {
     if (!lastStats || !worker) return;
+    refined = false; refOut.textContent = ""; clearCoarseGhost();
+    predGen = lastStats.count * tc.estimate.cgIterationsPerStep * S.iters * tc.estimate.overheadFactor; // × secPerElem × 1000 = ms before learning
     clearResult(); prev.forEach((x) => (x.visible = false));
     setLock(true); bar.value = 0; tStart = performance.now(); prog.textContent = "Starting… the first step is the slowest.";
     worker.postMessage({ type: "optimize", id: ++optId, vf: S.vf, rmin: S.rmin, maxIter: S.iters, mass: S.mass, accel: S.accel, gdir: S.gdir, extra: [S.fx, S.fy, S.fz] });
   }
 
   document.addEventListener("stage", (e) => {
-    active = e.detail === "C"; list.setVis(robotRow, active ? 1 : 2); list.setVis(boltRow, active ? 1 : 2); if (ghost) ghost.visible = active; panel.style.display = active ? "" : "none";
+    active = e.detail === "C"; list.setVis(robotRow, active ? 1 : 2); list.setVis(boltRow, active ? 1 : 2); if (ghost) ghost.visible = active; if (coarseGhost) coarseGhost.visible = active; panel.style.display = active ? "" : "none";
     prev.forEach((m) => (m.visible = active && !result)); if (result) result.visible = active;
     if (active) renderAvoid();
     if (active && !running) { sync(); run(); }
