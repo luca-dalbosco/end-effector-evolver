@@ -140,7 +140,7 @@ document.querySelectorAll("button[data-f]").forEach((b) => (b.onclick = () => wo
 refreshAll(); build();
 
 initFooterLinks(); 
-const toolEnd = initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers, list });
+const toolEnd = initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers, list, view });
 const toolConnect = initToolConnect({ scene, cam, renderer, $, toolEnd, getStart: () => startInfo, list });
 initExport({ worker, $, list, toolEnd, toolConnect, getStart: () => startInfo, getFlangeId: () => cur.flange.id });
 initSteps({

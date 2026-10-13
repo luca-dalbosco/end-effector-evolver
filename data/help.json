@@ -1,3 +1,5 @@
 {
-  "advanced": "Advanced mode lets you type any value, also outside the normal range, and shows extra settings. Each stage remembers its own on/off."
+  "advanced": "Advanced mode lets you type any value, also outside the normal range, and shows extra settings. Each stage remembers its own on/off.",
+  "primitiveSize": "Cube: edge length. Cylinder and cone: diameter and height. Sphere and the other solids: overall diameter. The type and size are used by \"Add primitive\", which always adds a new object. To change an object's size later, delete it and add a new one.",
+  "moveRotate": "Click an object in the 3D view or in the Objects list to select it. Arrows move it, rings rotate it. Type any value to go beyond the slider range. Space: world or local axes for the gizmo."
 }
