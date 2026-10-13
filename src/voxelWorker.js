@@ -1,17 +1,17 @@
 // Stage C worker (part 1): voxel grid, distance fields, design space preview, speed test.
 // Pure JavaScript, no geometry kernel. Units: mm.
+
+import { createFem, selfTest } from "./fem.js";
 const BIG = 1e9;
 
-// Speed test: how long one element-sized matrix multiply takes on this computer.
+// Speed test: seconds per element for one real solver matrix-vector product.
 function bench() {
-  const n = 1500, reps = 15, ke = new Float64Array(576), u = new Float64Array(24 * n), out = new Float64Array(24 * n);
-  for (let i = 0; i < 576; i++) ke[i] = Math.sin(i) + 2;
-  for (let i = 0; i < u.length; i++) u[i] = Math.cos(i);
+  const fem = createFem({ nx: 12, ny: 12, nz: 12 }), x = Float64Array.from({ length: fem.ndof }, (_, i) => Math.sin(i)), y = new Float64Array(fem.ndof);
+  fem.setDensity(new Float64Array(fem.nel).fill(1));
+  fem.matvec(x, y);
   const t0 = performance.now();
-  for (let r = 0; r < reps; r++)
-    for (let e = 0, o = 0; e < n; e++, o += 24)
-      for (let i = 0; i < 24; i++) { let s = 0; for (let j = 0; j < 24; j++) s += ke[i * 24 + j] * u[o + j]; out[o + i] += s; }
-  return (performance.now() - t0) / 1000 / (n * reps) + out[0] * 0;
+  for (let r = 0; r < 10; r++) fem.matvec(x, y);
+  return (performance.now() - t0) / 1000 / (10 * fem.nel);
 }
 
 // Points on triangles (flat list, 9 numbers per triangle), pushed slightly to the outside of the face.
@@ -137,6 +137,7 @@ function compute(m) {
 onmessage = (e) => {
   const m = e.data;
   if (m.type === "bench") return postMessage({ type: "bench", secPerElem: bench() });
+  if (m.type === "selftest") return postMessage({ type: "selftest", results: selfTest() });
   if (m.type !== "domain") return;
   try {
     const r = compute(m);
