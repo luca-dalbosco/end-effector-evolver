@@ -15,8 +15,9 @@ const SOLIDS = {
   tetrahedron: () => { const V = [[1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]]; return [V, V.map((v) => v.map((x) => -x))]; },
   cube: () => [gen([1, 1, 1]), gen([1, 0, 0])],
   octahedron: () => [gen([1, 0, 0]), gen([1, 1, 1])],
-  icosahedron: () => [gen([0, 1, PHI]), gen([1, 1, 1]).concat(gen([0, 1 / PHI, PHI]))],
-  dodecahedron: () => [gen([1, 1, 1]).concat(gen([0, 1 / PHI, PHI])), gen([0, 1, PHI])],
+  icosahedron: () => [gen([0, 1, PHI]), gen([1, 1, 1]).concat(gen([1 / PHI, 0, PHI]))],
+  dodecahedron: () => [gen([1, 1, 1]).concat(gen([0, 1 / PHI, PHI])), gen([1, 0, PHI])],
+  cuboctahedron: () => [gen([1, 1, 0]), gen([1, 1, 1]).concat(gen([1, 0, 0]))],
 };
 
 // Corners of one face, ordered counter-clockwise seen from outside.
@@ -42,6 +43,6 @@ export function buildPrimitive(kind, size) {
   const make = SOLIDS[kind]; if (!make) throw new Error("Unknown primitive: " + kind);
   const [V, N] = make();
   const k = kind === "cube" ? r : r / Math.max(...V.map((v) => Math.hypot(...v))); // cube: edge = size; others: overall diameter = size
-  const faces = N.map((n) => R.makeFace(R.makePolygon(faceOf(V, n).map((p) => p.map((x) => x * k)))));
+  const faces = N.map((n) => R.makePolygon(faceOf(V, n).map((p) => p.map((x) => x * k))));
   return R.makeSolid(faces);
 }
