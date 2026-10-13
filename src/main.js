@@ -5,6 +5,7 @@ import ts from "../data/toolStart.json";
 import { initFooterLinks } from './footerLinks.js';
 import { initToolEnd } from './toolEnd.js';
 import { initToolConnect } from './toolConnect.js';
+import { initObjectList } from './objectList.js';
 
 const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
 const $ = (id) => document.getElementById(id);
@@ -101,19 +102,25 @@ $("fs").onclick = () => {
 const view = $("view"), renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(devicePixelRatio); view.append(renderer.domElement);
 const scene = new THREE.Scene();
-const setTheme = (light) => { document.body.classList.toggle("light", light); scene.background = new THREE.Color(light ? 0xf4f4f4 : 0x1e1f22); localStorage.setItem("theme", light ? "light" : "dark"); };
-const tb = Object.assign(document.createElement("button"), { textContent: "Light / dark" }); tb.onclick = () => setTheme(!document.body.classList.contains("light"));
-Object.assign(tb.style, { position: "absolute", top: "8px", right: "8px" }); view.append(tb); setTheme(localStorage.getItem("theme") === "light");const cam = new THREE.PerspectiveCamera(40, 1, 1, 2000); cam.up.set(0, 0, 1); cam.position.set(90, -90, 70);
+const tb = Object.assign(document.createElement("button"), { title: "Light / dark" });
+const setTheme = (light) => { document.body.classList.toggle("light", light); scene.background = new THREE.Color(light ? 0xf4f4f4 : 0x1e1f22); tb.textContent = light ? "☾" : "☀"; localStorage.setItem("theme", light ? "light" : "dark"); };
+tb.onclick = () => setTheme(!document.body.classList.contains("light"));
+Object.assign(tb.style, { position: "absolute", top: "40px", left: "8px", width: "32px", fontSize: "16px" }); view.append(tb); setTheme(localStorage.getItem("theme") === "light");
+const cam = new THREE.PerspectiveCamera(40, 1, 1, 2000); cam.up.set(0, 0, 1); cam.position.set(90, -90, 70);
 const orbit = new OrbitControls(cam, renderer.domElement);
 scene.add(new THREE.HemisphereLight(0xffffff, 0x888888, 1.2)); const dl = new THREE.DirectionalLight(0xffffff, 1.5); dl.position.set(50, -80, 120); scene.add(dl);
 const grid = new THREE.GridHelper(200, 20, 0x999999, 0xcccccc); grid.rotation.x = Math.PI / 2; scene.add(grid); scene.add(new THREE.AxesHelper(30));
+const list = initObjectList({ view });
+const startGroup = new THREE.Group(); scene.add(startGroup); // the tool start lives in this group so the list can hide it
+list.add({ name: "Robotic flange", object: startGroup, deletable: false });
 let mesh = null;
 const resize = () => { renderer.setSize(view.clientWidth, view.clientHeight); cam.aspect = view.clientWidth / view.clientHeight; cam.updateProjectionMatrix(); };
 addEventListener("resize", resize); resize(); (function loop() { requestAnimationFrame(loop); renderer.render(scene, cam); })();
 function show(m) {
-  if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); }
+  if (mesh) { startGroup.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); }
   const bg = new THREE.BufferGeometry(); bg.setAttribute("position", new THREE.BufferAttribute(m.v, 3)); bg.setAttribute("normal", new THREE.BufferAttribute(m.n, 3)); bg.setIndex(new THREE.BufferAttribute(m.t, 1));
-  mesh = new THREE.Mesh(bg, new THREE.MeshStandardMaterial({ color: 0x4a7fb5, metalness: 0.1, roughness: 0.6, side: THREE.DoubleSide })); scene.add(mesh);
+  mesh = new THREE.Mesh(bg, new THREE.MeshStandardMaterial({ color: 0x4a7fb5, metalness: 0.1, roughness: 0.6, side: THREE.DoubleSide })); mesh.userData.base = true;
+  startGroup.add(mesh); list.refreshVisibility(); // keeps Transparent / Not visible after each rebuild
 }
 
 // ---------- build / export ----------
@@ -131,5 +138,5 @@ document.querySelectorAll("button[data-f]").forEach((b) => (b.onclick = () => wo
 refreshAll(); build();
 
 initFooterLinks(); 
-const toolEnd = initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers });
+const toolEnd = initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers, list });
 initToolConnect({ scene, cam, renderer, $, toolEnd, getStart: () => startInfo });
