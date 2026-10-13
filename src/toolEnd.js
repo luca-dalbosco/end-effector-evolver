@@ -9,6 +9,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
   const limit = te.maxFileSizeMB.default; // internal limit: edit it in data/toolEnd.json, not shown in the UI
   let part = null, partKind = null, cur = null, stage = "A", primKind = te.primitives[0].id, primSize = te.primitiveSize.default;
   const mine = []; // list entries that are tool-end parts (the flange is not in here)
+  let sidN = 0; // each part gets an id; the worker keeps its B-rep under it
   const dom = renderer.domElement;
 
   // ---------- panel (shown only in stage B) ----------
@@ -76,7 +77,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
   }
   list.onSelect(choose);
 
-  function setPart(m, keep, name, kind) {
+  function setPart(m, keep, name, kind, sid) { // sid = id of the B-rep kept in the worker (Export uses it)
     const bg = new THREE.BufferGeometry();
     bg.setAttribute("position", new THREE.BufferAttribute(m.v, 3)); bg.setAttribute("normal", new THREE.BufferAttribute(m.n, 3)); bg.setIndex(new THREE.BufferAttribute(m.t, 1));
     const mesh = new THREE.Mesh(bg, mat.clone()); mesh.userData.base = true; // "base" = the mesh the list makes transparent
@@ -84,19 +85,19 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
     if (keep && cur && cur.kind) { // "Apply to selected primitive": replace it, same place, same name (unless renamed)
       grp.position.copy(part.position); grp.rotation.copy(part.rotation);
       scene.remove(part); free(part);
-      cur.object = grp; cur.kind = kind; cur.size = primSize; part = grp; partKind = kind;
+      cur.object = grp; cur.kind = kind; cur.size = primSize; cur.sid = sid; part = grp; partKind = kind;
       if (cur.auto) list.setName(cur, name);
       scene.add(grp); attachAll(grp); list.refreshVisibility(); syncGizmo(); refresh();
     } else { // a new object
       const it = list.add({ name, object: grp, onRemove: dropPart });
-      it.kind = kind; it.size = kind ? primSize : null; mine.push(it); scene.add(grp);
+      it.kind = kind; it.size = kind ? primSize : null; it.sid = sid; mine.push(it); scene.add(grp);
       list.select(it);
     }
   }
   function dropPart(it) { // the list already removed the row
     const wasSelected = it === cur, i = mine.indexOf(it); if (i >= 0) mine.splice(i, 1);
     if (wasSelected) { attachAll(null); cur = null; part = null; partKind = null; }
-    scene.remove(it.object); free(it.object);
+    scene.remove(it.object); free(it.object); worker.postMessage({ type: "drop", sid: it.sid });
     if (wasSelected && mine.length) list.select(mine[mine.length - 1]);
     syncGizmo(); refresh();
   }
@@ -107,7 +108,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
     if (!m.ok) return say("bad", "✖ " + m.error);
     m.mesh.fg = m.fg;
     const kind = m.kind ?? null;
-    setPart(m.mesh, m.keep, m.name ?? te.primitives.find((p) => p.id === kind)?.label ?? "Part", kind);
+    setPart(m.mesh, m.keep, m.name ?? te.primitives.find((p) => p.id === kind)?.label ?? "Part", kind, m.sid);
     say("ok", "✔ Loaded " + (m.name ?? "part"));
   });
 
@@ -143,7 +144,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
       return say("bad", "✖ This does not look like a STEP file. Only STEP (B-rep) works for now, not IGES or mesh files (STL, OBJ).");
     say("", "Reading file…"); $("status").textContent = "Importing…";
     file.value = "";
-    worker.postMessage({ type: "import", name: f.name, data: buf }, [buf]);
+    worker.postMessage({ type: "import", name: f.name, data: buf, sid: ++sidN }, [buf]);
   }
   panel.append(file, btn("Add STEP", addStep));
 
@@ -152,7 +153,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
   function sendPrim(keep) {
     if (!(primSize > 0)) return say("bad", "✖ Size must be above 0.");
     $("status").textContent = "Building…";
-    worker.postMessage({ type: "primitive", kind: primKind, size: primSize, keep, name: te.primitives.find((p) => p.id === primKind).label });
+    worker.postMessage({ type: "primitive", kind: primKind, size: primSize, keep, sid: keep && cur?.sid != null ? cur.sid : ++sidN, name: te.primitives.find((p) => p.id === primKind).label });
   }
   const kindSel = document.createElement("select");
   te.primitives.forEach((p) => kindSel.add(new Option(p.label, p.id)));

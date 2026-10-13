@@ -1,0 +1,31 @@
+{
+  "scope": {
+    "default": "tool",
+    "options": [
+      { "id": "start", "label": "Tool start only" },
+      { "id": "tool", "label": "Tool (the connector), with or without tool start and tool end" },
+      { "id": "all", "label": "All objects, each in its place (tool start, connector, tool end, avoid objects)" }
+    ]
+  },
+  "withToolStart": { "default": false },
+  "withToolEnd": { "default": false },
+  "format": {
+    "default": "stl",
+    "options": [
+      { "id": "stl", "label": "STL (mesh)" },
+      { "id": "3mf", "label": "3MF (mesh, keeps objects apart)" },
+      { "id": "step", "label": "STEP (CAD)" }
+    ]
+  },
+  "resolution": {
+    "default": "fine",
+    "options": [
+      { "id": "draft", "label": "Draft (small file)", "toleranceMm": 0.1, "angleDeg": 25 },
+      { "id": "normal", "label": "Normal", "toleranceMm": 0.03, "angleDeg": 12 },
+      { "id": "fine", "label": "Fine", "toleranceMm": 0.01, "angleDeg": 6 },
+      { "id": "veryFine", "label": "Very fine (large file)", "toleranceMm": 0.003, "angleDeg": 3 }
+    ]
+  },
+  "toleranceMm": { "min": 0.001, "max": 1, "step": 0.001, "default": 0.01, "recommendedRange": [0.005, 0.05], "note": "Largest gap between the true curved surface and its triangles. Smaller = smoother and a bigger file." },
+  "angleDeg": { "min": 1, "max": 45, "step": 1, "default": 6, "recommendedRange": [3, 15], "note": "Largest angle between neighbouring triangles on a curved surface." }
+}
