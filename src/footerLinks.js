@@ -2,7 +2,7 @@
 
 const LINKS = {
   donate: 'https://www.buymeacoffee.com/YOUR-NAME',      // <- put your real link
-  source: 'https://github.com/luca-dalbosco/voxel-end-efector',      // <- repo link
+  source: 'https://github.com/luca-dalbosco/end-effector-evolver',      // <- repo link
   contact: 'mailto:YOUR-EMAIL@example.com',              // <- or a form URL later
 };
 
@@ -49,13 +49,13 @@ const WELCOME_KEY = 'welcomeHide'; // localStorage: '1' = do not open on start
 const PAGES = {
   about: {
     title: 'About',
-    html: `<p>Robotic End-Effector Generator creates a 3D-printable connector
+    html: `<p>End Effector Evolver creates a 3D-printable connector
       between a robot flange and your own part.</p>
       <p>Everything runs in your browser. Nothing is uploaded.</p>`,
   },
     licence: {
     title: 'Licence',
-    html: `<p><strong>Robotic End-Effector Generator</strong><br>
+    html: `<p><strong>End Effector Evolver</strong><br>
       Copyright © 2026 Luca Dalbosco and contributors</p>
       <p>This is free software, released under the
       <strong>GNU General Public License v3.0</strong>.</p>
