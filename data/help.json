@@ -7,5 +7,7 @@
   "thickness": "Wall and plate thickness in mm, used for the plate, the spigot wall and the collar wall. Green = recommended range.",
   "headSeat": "Cut for the screw heads on the face away from the robot. None: flat. Countersink: cone-shaped seat for flat-head screws. Counterbore: round pocket for socket-head screws.",
   "plateMargin": "Extra material between the screw heads and the plate edge, in mm. Green = recommended range.",
-  "tolerances": "How much each surface is offset so printed parts fit. A hole gets bigger by 2× the value in diameter, a peg gets smaller by 2× the value. Green = recommended, red = not recommended. Print a test piece when you change printer or material."
+  "tolerances": "How much each surface is offset so printed parts fit. A hole gets bigger by 2× the value in diameter, a peg gets smaller by 2× the value. Green = recommended, red = not recommended. Print a test piece when you change printer or material.",
+  "primitiveSize": "Cube: edge length. Cylinder and cone: diameter and height. Sphere and the other solids: overall diameter. The type and size are used by \"Add primitive\", which always adds a new object. To change an object's size later, delete it and add a new one.",
+  "moveRotate": "Click an object in the 3D view or in the Objects list to select it. Arrows move it, rings rotate it. Type any value to go beyond the slider range. Space: world or local axes for the gizmo."
 }
