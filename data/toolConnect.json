@@ -14,15 +14,19 @@
     "printWaistSteps": 6
   },
   "voxelSize": { "min": 0.5, "max": 2, "step": 0.1, "default": 1.5, "recommendedRange": [0.5, 2], "note": "Refined voxel size, used only by the Refine step (the first design uses a coarser voxel set by the voxel limit)." },
-  "designSpace": { "min": 0.05, "max": 2, "step": 0.05, "default": 0.25, "recommendedRange": [0.1, 0.4], "note": "How far the connector may wander from the straight path, as a fraction of the gap between the surfaces." },
+  "designSpace": { "min": 0.05, "max": 0.75, "step": 0.05, "default": 0.25, "recommendedRange": [0.1, 0.4], "note": "How far the connector may wander from the straight path, as a fraction of the gap between the surfaces." },
   "analysisVoxelBudget": { "min": 1000, "max": 200000, "step": 1000, "default": 6000, "recommendedRange": [3000, 40000], "note": "Maximum voxels in the design space. Fewer = much faster." },
-  "quality": {
-    "options": [
-      { "id": "draft", "label": "Draft (fast, rough shape)", "budget": 6000, "iters": 40 },
-      { "id": "normal", "label": "Normal", "budget": 20000, "iters": 60 },
-      { "id": "fine", "label": "Fine (slow)", "budget": 40000, "iters": 80 }
+  "refinement": {
+    "default": "draft",
+    "draftVoxelMm": 1.5,
+    "note": "Draft = design + clearance on the first-pass voxel (about 1.5 mm). Normal and Fine refine the Draft on a finer voxel: Fine uses the voxel target size, Normal is halfway between Draft and the target. A level unlocks when the one before it has finished.",
+    "levels": [
+      { "id": "draft", "label": "Draft" },
+      { "id": "normal", "label": "Normal" },
+      { "id": "fine", "label": "Fine" }
     ]
   },
+  "voxelTarget": { "min": 0.5, "max": 1, "step": 0.05, "default": 1, "recommendedRange": [0.6, 1], "note": "Voxel size of the Fine level. Smaller = more detail, much slower. Normal is halfway between the Draft voxel and this size." },
   "toolStartConnection": {
     "default": "entire",
     "options": [
@@ -30,17 +34,8 @@
       { "id": "partial", "label": "Partial (spigot area only)" }
     ]
   },
-  "volumeFraction": { "min": 0.05, "max": 0.6, "step": 0.01, "default": 0.25, "recommendedRange": [0.1, 0.4], "note": "Share of the design space that may be filled. Left = light, right = strong." },
-  "strength": {
-    "default": "balanced",
-    "options": [
-      { "id": "light", "label": "Light", "vf": 0.15 },
-      { "id": "balanced", "label": "Balanced", "vf": 0.25 },
-      { "id": "strong", "label": "Strong", "vf": 0.4 }
-    ]
-  },
+  "volumeFraction": { "min": 0.05, "max": 0.6, "step": 0.01, "default": 0.25, "recommendedRange": [0.15, 0.4], "note": "Material amount: share of the design space that may be filled. Left = light, right = strong. The weight next to it is an estimate for the first pass." },
   "printReady": { "default": false, "smoothMaxPower": 40, "smoothMinEps": 0.0001, "startDensity": 0.5, "note": "Print-ready (test): printed with the flange face on the bed. Nothing grows below the bed, and every voxel must rest on voxels below it (45° overhang at most), so there are no supports and no floating islands. Method: additive manufacturing filter (Langelaar 2017)." },
-  "refineAtEnd": { "default": true, "note": "Generate ends with a Refine run at the refined voxel size (slower, nicer result)." },
   "material": { "label": "PLA", "densityGcm3": 1.24, "youngsModulusMPa": 2300, "note": "Used only for the weight and sag readout (solid, 100% infill). Printed parts are weaker across layers." },
   "cantileverRatio": { "min": 0.7, "max": 1.05, "note": "Self-test: the solver's cantilever tip drop divided by beam theory must fall in this range." },
   "arrowLengthMm": 60,
