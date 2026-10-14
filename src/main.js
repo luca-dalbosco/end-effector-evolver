@@ -4,21 +4,25 @@ import flangeData from "../data/flanges.json";
 import ts from "../data/toolStart.json";
 import { initFooterLinks } from './footerLinks.js';
 import { initToolEnd } from './toolEnd.js';
-import { initToolConnect } from './toolConnect.js';
+import { initToolConnect } from './toolConnect/index.js';
 import { initObjectList } from './objectList.js';
 import { initExport } from './exportStage.js';
-import { initAdvanced, initSteps, section, help } from './ui.js';
+import exportCfg from "../data/export.json";
+import { initAdvanced, initSteps, section, help, line, download, numberRow, recNote } from './ui.js';
+import { rpc, serial } from './rpc.js';
 
-const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+const geo = rpc(new Worker(new URL("./worker.js", import.meta.url), { type: "module" })); // geometry engine (OpenCascade)
 const $ = (id) => document.getElementById(id);
-const flanges = [...flangeData.flanges, ...JSON.parse(localStorage.getItem("customFlanges") || "[]")];
+// saved custom flanges: a broken or old entry is skipped instead of stopping the app
+const savedFlanges = () => { try { const a = JSON.parse(localStorage.getItem("customFlanges") || "[]"); return Array.isArray(a) ? a.filter((f) => f?.id && f.geometry?.pitchCircleDiameter > 0 && f.geometry.threadedHoles) : []; } catch (e) { return []; } };
+const flanges = [...flangeData.flanges, ...savedFlanges()];
 const ready = (f) => f.status !== "needs data";
 const cur = { flange: flanges.find(ready) };
 const tolCfg = ts.tolerances;
 const settings = { fitMode: ts.fitMode.default, thickness: ts.thickness.default, dowelMode: ts.dowel.mode.default, headSeat: ts.screwClearance.headSeat.default,
   plateMargin: ts.plateEdgeMargin.default, spigotStyle: ts.spigotStyle.default, wallKeys: ts.wallKeys.default, chamfer: { robotFacing: false, awayFacing: false, size: ts.chamfer.size.default },
   tolerances: Object.fromEntries(Object.entries(tolCfg).filter(([, v]) => typeof v === "object").map(([k, v]) => [k, v.default])) };
-let advanced = false, reqId = 0, timer = null, startInfo = null, startOk = false;
+let advanced = false, timer = null, startInfo = null, startOk = false;
 const refreshers = [];
 const g = () => cur.flange.geometry;
 
@@ -37,16 +41,8 @@ function select(label, getOpts, get, set, used, optOk = () => true, helpId) {
 }
 function check(label, get, set, hidden, helpId) { const l = document.createElement("label"), c = document.createElement("input"); c.type = "checkbox"; c.onchange = () => { set(c.checked); refreshAll(); schedule(); }; l.append(c, " " + label); if (helpId) l.append(help(helpId)); row("", l, () => true, hidden); refreshers.push(() => (c.checked = get())); }
 function slider(label, cfg, get, set, used = () => true, hidden = () => false, helpId) {
-  const r = document.createElement("input"), n = document.createElement("input"), box = document.createElement("div"), note = document.createElement("div");
-  r.type = "range"; n.type = "number"; [r, n].forEach((x) => { x.min = cfg.min; x.max = cfg.max; x.step = cfg.step; });
-  const rec = cfg.recommendedRange, bad = cfg.notRecommendedRange; note.className = "rec";
-  note.textContent = (rec ? `recommended ${rec[0]} to ${rec[1]}` : "") + (bad ? `, not recommended ${bad[0]} to ${bad[1]}` : "");
-  box.append(r, n, note);
-  r.oninput = () => { set(+r.value); refreshAll(); }; r.onchange = schedule;
-  n.onchange = () => { let v = +n.value; if (isNaN(v)) return; if (!advanced) v = Math.min(cfg.max, Math.max(cfg.min, v)); set(v); refreshAll(); schedule(); };
-  row(label, box, used, hidden, helpId);
-  refreshers.push(() => { const v = get(); r.value = n.value = v; r.disabled = advanced;
-    n.className = rec && v >= rec[0] && v <= rec[1] ? "ok" : (bad && v >= bad[0] && v <= bad[1]) || v < cfg.min || v > cfg.max ? "bad" : "warn"; });
+  const nr = numberRow({ label, cfg, help: helpId, get, set, live: refreshAll, commit: schedule, clamp: () => !advanced, note: recNote(cfg), hidden, off: () => !used(), lockSlider: () => advanced });
+  host.append(nr.el); refreshers.push(nr.refresh);
 }
 const refreshAll = () => refreshers.forEach((f) => f());
 
@@ -85,12 +81,13 @@ initAdvanced($("adv"));
 document.addEventListener("advanced", (e) => { if (e.detail.stage !== "A") return; advanced = e.detail.on; if (!advanced) settings.chamfer.size = ts.chamfer.size.default; refreshAll(); schedule(); });
 
 // ---------- local flange form ----------
-const fields = [["brand", "Brand (optional, e.g. KUKA)", "text"], ["name", "Model name (e.g. My robot)", "text"], ["pcd", "Pitch circle diameter", "number"], ["thread", "Screw thread", "M3,M4,M5,M6,M8,M10,M12"], ["threadDepth", "Thread depth", "number"],
+const fields = [["brand", "Brand (optional, e.g. KUKA)", "text"], ["name", "Model name (e.g. My robot)", "text"], ["pcd", "Pitch circle diameter", "number"], ["thread", "Screw thread", Object.keys(ts.screwClearance.headDiameterByScrew).join(",")], ["threadDepth", "Thread depth", "number"],
   ["positions", "Number of hole positions on the circle", "number"], ["pinD", "Locating pin hole diameter (empty = no pin; it takes position 0)", "number?"], ["pinDepth", "Pin hole depth", "number?"],
   ["spigotD", "Raised spigot diameter (empty = none)", "number?"], ["spigotH", "Raised spigot height", "number?"], ["centreD", "Centre hole diameter (empty = none)", "number?"], ["centreDepth", "Centre hole depth", "number?"],
   ["outerD", "Flange outer diameter (needed when there is no raised spigot)", "number?"]];
 const dlg = document.createElement("dialog"); dlg.innerHTML = "<b>Create local robotic flange</b><div id='ff'></div><div id='fe' class='bad'></div><button id='fs'>Save</button><button id='fc'>Cancel</button>"; document.body.append(dlg);
 $("ff").innerHTML = fields.map(([k, l, t]) => `<label>${l}${t.includes(",") ? `<select id="f_${k}">${t.split(",").map((o) => `<option>${o}</option>`).join("")}</select>` : `<input id="f_${k}" type="${t.startsWith("number") ? "number" : "text"}" step="any">`}</label>`).join("");
+$("f_thread").value = "M5"; // the common robot flange screw
 const fv = (k) => $("f_" + k).value, fn = (k) => (fv(k) === "" ? null : +fv(k));
 function openForm() { $("fe").textContent = ""; dlg.showModal(); }
 $("fc").onclick = () => { dlg.close(); refreshAll(); };
@@ -125,7 +122,14 @@ const startGroup = new THREE.Group(); scene.add(startGroup); // the tool start l
 list.add({ name: "Robotic flange", object: startGroup, deletable: false });
 let mesh = null;
 const resize = () => { renderer.setSize(view.clientWidth, view.clientHeight); cam.aspect = view.clientWidth / view.clientHeight; cam.updateProjectionMatrix(); };
-addEventListener("resize", resize); resize(); (function loop() { requestAnimationFrame(loop); renderer.render(scene, cam); })();
+addEventListener("resize", resize); resize();
+// draw on demand: while something happens (input, orbit, worker replies, stage events) and for a moment after, not 60 times a second when idle
+let drawUntil = 0, drawing = false;
+const wake = () => { drawUntil = performance.now() + 1500; if (!drawing) { drawing = true; requestAnimationFrame(frame); } };
+function frame() { renderer.render(scene, cam); if (performance.now() < drawUntil) requestAnimationFrame(frame); else drawing = false; }
+for (const t of ["pointerdown", "pointermove", "pointerup", "wheel", "keydown", "input", "change", "click", "resize"]) addEventListener(t, wake, { capture: true, passive: true });
+for (const t of ["stage", "advanced", "startbuilt", "workerreply"]) document.addEventListener(t, wake);
+orbit.addEventListener("change", wake); wake();
 function show(m) {
   if (mesh) { startGroup.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); }
   const bg = new THREE.BufferGeometry(); bg.setAttribute("position", new THREE.BufferAttribute(m.v, 3)); bg.setAttribute("normal", new THREE.BufferAttribute(m.n, 3)); bg.setIndex(new THREE.BufferAttribute(m.t, 1));
@@ -134,23 +138,27 @@ function show(m) {
 }
 
 // ---------- build / export ----------
-function schedule() { clearTimeout(timer); timer = setTimeout(build, 250); }
-function build() { $("status").textContent = "Building…"; worker.postMessage({ type: "build", id: ++reqId, flange: JSON.parse(JSON.stringify(cur.flange)), settings: structuredClone(settings) }); }
-worker.onmessage = (e) => {
-  const m = e.data;
-  if (m.exported) { const url = URL.createObjectURL(new Blob([m.data])); Object.assign(document.createElement("a"), { href: url, download: `robot_side_${cur.flange.id}.${m.format}` }).click(); return; }
-  if (m.id !== reqId) return;
-  $("status").textContent = m.ok ? "Ready" : "Cannot build"; startOk = !!m.ok;
-  $("msg").innerHTML = [...(m.errors || []).map((x) => `<div class="bad">✖ ${x}</div>`), ...(m.warnings || []).map((x) => `<div class="warn">⚠ ${x}</div>`)].join("");
-  if (m.ok) { show(m.mesh); startInfo = m; document.dispatchEvent(new Event("startbuilt")); }
-};
-document.querySelectorAll("button[data-f]").forEach((b) => (b.onclick = () => worker.postMessage({ type: "export", id: reqId, format: b.dataset.f })));
+function schedule() { clearTimeout(timer); timer = setTimeout(build, ts.rebuildDelayMs); }
+const sendBuild = serial(geo, "build"); // one build at a time, only the newest settings wait
+function build() {
+  $("status").textContent = "Building…"; startOk = false;
+  sendBuild({ flange: structuredClone(cur.flange), settings: structuredClone(settings) }, (m) => {
+    $("status").textContent = m.ok ? "Ready" : "Cannot build"; startOk = !!m.ok;
+    $("msg").replaceChildren(...(m.errors || []).map((x) => line("bad", "✖ " + x)), ...(m.warnings || []).map((x) => line("warn", "⚠ " + x)));
+    if (m.ok) { show(m.mesh); startInfo = m; document.dispatchEvent(new Event("startbuilt")); }
+  });
+}
+document.querySelectorAll("button[data-f]").forEach((b) => (b.onclick = () => { // same writer as stage 4, at its default resolution
+  const q = exportCfg.resolution.options.find((o) => o.id === exportCfg.resolution.default);
+  geo("exportScene", { format: b.dataset.f, tol: q.toleranceMm, ang: (q.angleDeg * Math.PI) / 180, items: [{ name: "Robot side", src: "start" }], base: `robot_side_${cur.flange.id}` },
+    (m) => (m.ok ? download(m.file, m.data) : $("msg").replaceChildren(line("bad", "✖ " + m.error))));
+}));
 refreshAll(); build();
 
 initFooterLinks(); 
-const toolEnd = initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers, list, view });
+const toolEnd = initToolEnd({ scene, cam, renderer, orbit, geo, $, refreshers, list, view });
 const toolConnect = initToolConnect({ scene, cam, renderer, $, toolEnd, getStart: () => startInfo, list });
-initExport({ worker, $, list, toolEnd, toolConnect, getStart: () => startInfo, getFlangeId: () => cur.flange.id });
+initExport({ geo, $, list, toolEnd, toolConnect, getStart: () => startInfo, getFlangeId: () => cur.flange.id });
 initSteps({
   A: () => (startOk ? null : $("status").textContent === "Building…" ? "Building the robot side…" : "The robot side cannot be built. See the message above."),
   B: () => (toolEnd.getPart() ? null : "No object yet. Import a STEP file or add a primitive."),

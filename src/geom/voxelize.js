@@ -1,6 +1,5 @@
-// Helpers for stage C: voxelize a solid, check the way is open, spread a load over a rigid face. Units: mm.
+// Helpers for stage C: voxelize a solid, centre of a solid, spread a load over a rigid face. Units: mm.
 const EX = 1.234e-6, EY = 0.567e-6; // tiny shift so rays never hit a triangle edge exactly
-const D6 = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
 
 // Marks the cells whose centre is inside a closed triangle mesh (tris: 9 numbers per triangle).
 export function voxelizeSolid(tris, nx, ny, nz, org, h) {
@@ -29,22 +28,6 @@ export function voxelizeSolid(tris, nx, ny, nz, org, h) {
     }
   }
   return out;
-}
-
-// True if the open cells connect some A cell to some B cell.
-export function connected(open, srcA, srcB, nx, ny, nz) {
-  const N = nx * ny * nz, seen = new Uint8Array(N), queue = new Int32Array(N);
-  let qh = 0, qt = 0;
-  for (let c = 0; c < N; c++) if (srcA[c]) { seen[c] = 1; queue[qt++] = c; }
-  while (qh < qt) {
-    const c = queue[qh++]; if (srcB[c]) return true;
-    const x = c % nx, y = Math.floor(c / nx) % ny, z = Math.floor(c / (nx * ny));
-    for (const [dx, dy, dz] of D6) {
-      const X = x + dx, Y = y + dy, Z = z + dz; if (X < 0 || Y < 0 || Z < 0 || X >= nx || Y >= ny || Z >= nz) continue;
-      const n = X + nx * (Y + ny * Z); if (!seen[n] && open[n]) { seen[n] = 1; queue[qt++] = n; }
-    }
-  }
-  return false;
 }
 
 // Volume centre of a closed triangle mesh (falls back to the bounding box centre).

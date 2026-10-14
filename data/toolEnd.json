@@ -13,5 +13,6 @@
     { "id": "dodecahedron", "label": "Dodecahedron" },
     { "id": "icosahedron", "label": "Icosahedron" },
     { "id": "cuboctahedron", "label": "Cuboctahedron" }
-  ]
+  ],
+  "viewMesh": {"toleranceMm": 0.05, "angleDeg": 11.5, "note": "Mesh of tool parts in the 3D view and for stage 3 (not the export). Smaller = smoother, slower."}
 }

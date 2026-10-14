@@ -3,9 +3,9 @@
 import * as THREE from "three";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import te from "../data/toolEnd.json";
-import { section, help } from "./ui.js";
+import { section, help, numberRow } from "./ui.js";
 
-export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers, list, view }) {
+export function initToolEnd({ scene, cam, renderer, orbit, geo, $, refreshers, list, view }) {
   const refresh = () => refreshers.forEach((f) => f());
   const limit = te.maxFileSizeMB.default; // internal limit: edit it in data/toolEnd.json, not shown in the UI
   let part = null, partKind = null, cur = null, stage = "A", primKind = te.primitives[0].id, primSize = te.primitiveSize.default;
@@ -91,37 +91,27 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
   function dropPart(it) { // the list already removed the row
     const wasSelected = it === cur, i = mine.indexOf(it); if (i >= 0) mine.splice(i, 1);
     if (wasSelected) { attachAll(null); cur = null; part = null; partKind = null; }
-    scene.remove(it.object); free(it.object); worker.postMessage({ type: "drop", sid: it.sid });
+    scene.remove(it.object); free(it.object); geo("drop", { sid: it.sid });
     if (wasSelected && mine.length) list.select(mine[mine.length - 1]);
     syncGizmo(); refresh();
   }
   function resetPose() { if (!part) return; part.position.set(0, 0, 0); part.rotation.set(0, 0, 0); refresh(); }
-  worker.addEventListener("message", (e) => {
-    const m = e.data; if (!m.imported) return;
+  function onPart(m) { // reply of "import" or "primitive"
     $("status").textContent = "Ready";
     if (!m.ok) return say("bad", "✖ " + m.error);
     m.mesh.fg = m.fg;
     const kind = m.kind ?? null;
     setPart(m.mesh, m.name ?? te.primitives.find((p) => p.id === kind)?.label ?? "Part", kind, m.sid);
     say("ok", "✔ Loaded " + (m.name ?? "part"));
-  });
+  }
 
   // ---------- number rows (slider + typed value; typing may go beyond the slider range) ----------
-  function numRow(label, cfg, get, set, needPart = true, parent = body, helpId) {
-    const d = document.createElement("div"); d.className = "row";
-    const l = document.createElement("label"), r = document.createElement("input"), n = document.createElement("input"), note = document.createElement("div");
-    l.textContent = label; if (helpId) l.append(help(helpId)); r.type = "range"; n.type = "number";
-    r.min = cfg.min; r.max = cfg.max; r.step = cfg.step; n.step = cfg.step; // only the slider is limited
-    const rec = cfg.recommendedRange; note.className = "rec";
-    note.textContent = (rec ? `recommended ${rec[0]} to ${rec[1]}; ` : "") + "type any value to go beyond the slider"; if (parent !== body) note.style.display = "none";
-    r.oninput = () => { if (needPart && !part) return; set(+r.value); refresh(); };
-    n.onchange = () => { const v = +n.value; if (n.value === "" || isNaN(v) || (needPart && !part)) return; set(v); refresh(); };
-    d.append(l, r, n, note); parent.append(d);
-    refreshers.push(() => {
-      const v = Math.round(get() * 1000) / 1000; r.value = n.value = v;
-      d.classList.toggle("off", needPart && !part);
-      n.className = rec ? (v >= rec[0] && v <= rec[1] ? "ok" : "warn") : "";
-    });
+  function numRow(label, cfg, get, set, needPart = true, parent = body, helpId) { // typing may go beyond the slider range
+    const rec = cfg.recommendedRange;
+    const nr = numberRow({ label, cfg, help: helpId, get, set, live: refresh, off: () => needPart && !part, digits: 3,
+      note: parent === body ? (rec ? `recommended ${rec[0]} to ${rec[1]}; ` : "") + "type any value to go beyond the slider" : null,
+      rate: (v) => (rec ? (v >= rec[0] && v <= rec[1] ? "ok" : "warn") : "") });
+    parent.append(nr.el); refreshers.push(nr.refresh);
   }
 
   // ---------- Import STEP ----------
@@ -137,7 +127,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
       return say("bad", "✖ This does not look like a STEP file. Only STEP (B-rep) works for now, not IGES or mesh files (STL, OBJ).");
     say("", "Reading file…"); $("status").textContent = "Importing…";
     file.value = "";
-    worker.postMessage({ type: "import", name: f.name, data: buf, sid: ++sidN }, [buf]);
+    geo("import", { name: f.name, data: buf, sid: ++sidN }, onPart, [buf]);
   }
   body.append(file, btn("Add STEP", addStep));
 
@@ -145,7 +135,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
   function sendPrim() {
     if (!(primSize > 0)) return say("bad", "✖ Size must be above 0.");
     $("status").textContent = "Building…";
-    worker.postMessage({ type: "primitive", kind: primKind, size: primSize, sid: ++sidN, name: te.primitives.find((p) => p.id === primKind).label });
+    geo("primitive", { kind: primKind, size: primSize, sid: ++sidN, name: te.primitives.find((p) => p.id === primKind).label }, onPart);
   }
   const kindSel = document.createElement("select");
   te.primitives.forEach((p) => kindSel.add(new Option(p.label, p.id)));

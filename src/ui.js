@@ -2,7 +2,13 @@
 // and the one Advanced switch under the stage tabs (each stage keeps its own on/off).
 import helpText from "../data/help.json";
 
-const el = (tag, cls = "", text = "") => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
+export const el = (tag, cls = "", text = "") => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
+export const line = (cls, text) => el("div", cls, text); // one message line (text is never parsed as HTML)
+export const download = (file, data) => { // hands a file from memory to the browser's download
+  const url = URL.createObjectURL(new Blob([data])), a = Object.assign(document.createElement("a"), { href: url, download: file });
+  a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+export const esc =(t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); // for text put inside innerHTML
 
 // one floating tip box for every "?" (shows on hover, and on tap/click until you click elsewhere)
 let tip = null, pinned = null;
@@ -50,6 +56,50 @@ export function segmented(options, onChange) {
   const set = (id) => btns.forEach((b) => b.classList.toggle("on", b.dataset.id === id));
   const enable = (id, on, tip = "") => btns.forEach((b) => { if (b.dataset.id === id) { b.disabled = !on; b.title = on ? "" : tip; } }); // greyed out with a hover tip
   return { el: box, set, enable };
+}
+
+// Colour of a typed value: green inside the recommended range, red inside the not-recommended range or outside min..max, orange otherwise.
+export function rateOf(cfg, v) {
+  const rec = cfg.recommendedRange, bad = cfg.notRecommendedRange, inR = (r) => r && v >= r[0] && v <= r[1];
+  if (inR(rec)) return "ok";
+  if (inR(bad) || v < cfg.min || v > cfg.max) return "bad";
+  return rec ? "warn" : "";
+}
+export const recNote = (cfg) => [cfg.recommendedRange && `recommended ${cfg.recommendedRange[0]} to ${cfg.recommendedRange[1]}`,
+  cfg.notRecommendedRange && `not recommended ${cfg.notRecommendedRange[0]} to ${cfg.notRecommendedRange[1]}`].filter(Boolean).join(", ");
+
+// One number setting: label, slider and typed value. cfg comes from data/*.json (min, max, step, recommendedRange, notRecommendedRange).
+// o = { label, cfg, help, get(), set(v),
+//   live()    after every change (slider move or typed value), commit() when the value is final (slider released or value typed),
+//   clamp()   true = typed values are kept inside min..max (Basic mode), note: text under the row,
+//   hidden(), off()   hide the row / grey it out, lockSlider() true = only typing works (stage 1 Advanced),
+//   bounds()  moving slider range [min, max], rate(v) colour class of the value (default rateOf), digits: rounding of the shown value }
+// Returns { el, refresh }: put refresh in the stage's refresh list.
+export function numberRow(o) {
+  const cfg = o.cfg, d = el("div", "row"), l = el("label", "", o.label);
+  const r = Object.assign(el("input"), { type: "range", min: cfg.min, max: cfg.max, step: cfg.step });
+  const n = Object.assign(el("input"), { type: "number", step: cfg.step });
+  if (o.help) l.append(help(o.help));
+  d.append(l, r, n); if (o.note) d.append(el("div", "rec", o.note));
+  const shown = (v) => (o.digits == null ? v : Math.round(v * 10 ** o.digits) / 10 ** o.digits);
+  const change = (v) => { o.set(v); o.live?.(); };
+  r.oninput = () => { if (!o.off?.()) change(+r.value); };
+  r.onchange = () => { if (!o.off?.()) o.commit?.(); };
+  n.onchange = () => {
+    let v = +n.value;
+    if (n.value === "" || isNaN(v) || o.off?.()) return refresh();
+    if (o.clamp?.()) { const [lo, hi] = o.bounds ? o.bounds() : [cfg.min, cfg.max]; v = Math.min(hi, Math.max(lo, v)); }
+    change(v); o.commit?.();
+  };
+  function refresh() {
+    d.style.display = o.hidden?.() ? "none" : "";
+    d.classList.toggle("off", !!o.off?.());
+    const v = shown(o.get()); if (!Number.isFinite(v)) return; // greyed-out rows keep showing their value when they have one
+    if (o.bounds) { const [lo, hi] = o.bounds(); r.min = lo; r.max = hi; }
+    r.value = n.value = v; r.disabled = !!o.lockSlider?.();
+    n.className = o.rate ? o.rate(v) : rateOf(cfg, v);
+  }
+  return { el: d, refresh };
 }
 
 // Tab status (✔ / ⚠ on each tab) and the Next button at the bottom of the side panel.
