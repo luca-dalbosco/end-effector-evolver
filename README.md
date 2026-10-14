@@ -1,7 +1,9 @@
-# Robotic End-Effector Generator
+# End Effector Evolver
 
 A browser tool that generates a 3D-printable connector between a robot flange and your own CAD part.
 Everything runs locally in your browser. No server, no uploads.
+
+**Although End Effector designs made by the tool grow from design rules (like they evolve), it has no evolutionary algorithms (at least not yet).**
 
 Work in progress. Not released yet.
 
