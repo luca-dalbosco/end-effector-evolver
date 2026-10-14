@@ -3,14 +3,16 @@
 import * as THREE from "three";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import te from "../data/toolEnd.json";
+import { section, help } from "./ui.js";
 
-export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers, list }) {
+export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers, list, view }) {
   const refresh = () => refreshers.forEach((f) => f());
   const limit = te.maxFileSizeMB.default; // internal limit: edit it in data/toolEnd.json, not shown in the UI
   let part = null, partKind = null, cur = null, stage = "A", primKind = te.primitives[0].id, primSize = te.primitiveSize.default;
   const mine = []; // list entries that are tool-end parts (the flange is not in here)
   let sidN = 0; // each part gets an id; the worker keeps its B-rep under it
   const dom = renderer.domElement;
+  let dropUp = null; // position/rotation drop-up in the 3D view
 
   // ---------- panel (shown only in stage B) ----------
   const stageA = ["controls", "msg", "exportA"].map($);
@@ -25,7 +27,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
     spans.forEach((s) => s.classList.toggle("on", s.dataset.s === st));
     document.dispatchEvent(new CustomEvent("stage", { detail: st }));
   }
-  const head = (t) => { const b = document.createElement("div"); b.textContent = t; b.style.cssText = "font-weight:700;margin:14px 0 4px"; panel.append(b); };
+  const add = section("Add objects"); panel.append(add.box); const body = add.body;
   const btn = (label, fn) => { const b = document.createElement("button"); b.textContent = label; b.onclick = fn; return b; };
 
   // ---------- gizmo: move arrows + rotate rings together (two controls on the same object) ----------
@@ -36,7 +38,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
   } catch (err) { /* harmless: the gizmo just keeps its extra handles */ }
   helpers.forEach((h) => { h.visible = false; scene.add(h); });
   gizmos.forEach((g) => { g.addEventListener("dragging-changed", (e) => (orbit.enabled = !e.value)); g.addEventListener("objectChange", refresh); });
-  function syncGizmo() { const on = stage === "B"; gizmos.forEach((g) => (g.enabled = on)); helpers.forEach((h) => (h.visible = on && !!part)); }
+  function syncGizmo() { const on = stage === "B"; gizmos.forEach((g) => (g.enabled = on)); helpers.forEach((h) => (h.visible = on && !!part)); if (dropUp) dropUp.style.display = on && part ? "" : "none"; }
   // where an arrow and a ring overlap, the arrow wins (so only one of the two reacts to the mouse)
   const ptr = (e) => { const r = dom.getBoundingClientRect(); return { x: ((e.clientX - r.left) / r.width) * 2 - 1, y: (-(e.clientY - r.top) / r.height) * 2 + 1, button: e.button }; };
   function arbitrate(e) {
@@ -77,22 +79,14 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
   }
   list.onSelect(choose);
 
-  function setPart(m, keep, name, kind, sid) { // sid = id of the B-rep kept in the worker (Export uses it)
+  function setPart(m, name, kind, sid) { // sid = id of the B-rep kept in the worker (Export uses it)
     const bg = new THREE.BufferGeometry();
     bg.setAttribute("position", new THREE.BufferAttribute(m.v, 3)); bg.setAttribute("normal", new THREE.BufferAttribute(m.n, 3)); bg.setIndex(new THREE.BufferAttribute(m.t, 1));
     const mesh = new THREE.Mesh(bg, mat.clone()); mesh.userData.base = true; // "base" = the mesh the list makes transparent
     const grp = new THREE.Group(); grp.userData.fg = m.fg; grp.add(mesh);
-    if (keep && cur && cur.kind) { // "Apply to selected primitive": replace it, same place, same name (unless renamed)
-      grp.position.copy(part.position); grp.rotation.copy(part.rotation);
-      scene.remove(part); free(part);
-      cur.object = grp; cur.kind = kind; cur.size = primSize; cur.sid = sid; part = grp; partKind = kind;
-      if (cur.auto) list.setName(cur, name);
-      scene.add(grp); attachAll(grp); list.refreshVisibility(); syncGizmo(); refresh();
-    } else { // a new object
-      const it = list.add({ name, object: grp, onRemove: dropPart });
-      it.kind = kind; it.size = kind ? primSize : null; it.sid = sid; mine.push(it); scene.add(grp);
-      list.select(it);
-    }
+    const it = list.add({ name, object: grp, onRemove: dropPart });
+    it.kind = kind; it.size = kind ? primSize : null; it.sid = sid; mine.push(it); scene.add(grp);
+    list.select(it);
   }
   function dropPart(it) { // the list already removed the row
     const wasSelected = it === cur, i = mine.indexOf(it); if (i >= 0) mine.splice(i, 1);
@@ -108,21 +102,21 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
     if (!m.ok) return say("bad", "✖ " + m.error);
     m.mesh.fg = m.fg;
     const kind = m.kind ?? null;
-    setPart(m.mesh, m.keep, m.name ?? te.primitives.find((p) => p.id === kind)?.label ?? "Part", kind, m.sid);
+    setPart(m.mesh, m.name ?? te.primitives.find((p) => p.id === kind)?.label ?? "Part", kind, m.sid);
     say("ok", "✔ Loaded " + (m.name ?? "part"));
   });
 
   // ---------- number rows (slider + typed value; typing may go beyond the slider range) ----------
-  function numRow(label, cfg, get, set, needPart = true) {
+  function numRow(label, cfg, get, set, needPart = true, parent = body, helpId) {
     const d = document.createElement("div"); d.className = "row";
     const l = document.createElement("label"), r = document.createElement("input"), n = document.createElement("input"), note = document.createElement("div");
-    l.textContent = label; r.type = "range"; n.type = "number";
+    l.textContent = label; if (helpId) l.append(help(helpId)); r.type = "range"; n.type = "number";
     r.min = cfg.min; r.max = cfg.max; r.step = cfg.step; n.step = cfg.step; // only the slider is limited
     const rec = cfg.recommendedRange; note.className = "rec";
-    note.textContent = (rec ? `recommended ${rec[0]} to ${rec[1]}; ` : "") + "type any value to go beyond the slider";
+    note.textContent = (rec ? `recommended ${rec[0]} to ${rec[1]}; ` : "") + "type any value to go beyond the slider"; if (parent !== body) note.style.display = "none";
     r.oninput = () => { if (needPart && !part) return; set(+r.value); refresh(); };
     n.onchange = () => { const v = +n.value; if (n.value === "" || isNaN(v) || (needPart && !part)) return; set(v); refresh(); };
-    d.append(l, r, n, note); panel.append(d);
+    d.append(l, r, n, note); parent.append(d);
     refreshers.push(() => {
       const v = Math.round(get() * 1000) / 1000; r.value = n.value = v;
       d.classList.toggle("off", needPart && !part);
@@ -131,8 +125,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
   }
 
   // ---------- Import STEP ----------
-  panel.append(msg);
-  head("Import STEP");
+  body.append(msg);
   const file = Object.assign(document.createElement("input"), { type: "file", accept: ".step,.stp" });
   file.onchange = () => { const f = file.files[0]; if (f) say("", "Selected: " + f.name + ". Click Add STEP."); };
   async function addStep() {
@@ -146,34 +139,34 @@ export function initToolEnd({ scene, cam, renderer, orbit, worker, $, refreshers
     file.value = "";
     worker.postMessage({ type: "import", name: f.name, data: buf, sid: ++sidN }, [buf]);
   }
-  panel.append(file, btn("Add STEP", addStep));
+  body.append(file, btn("Add STEP", addStep));
 
   // ---------- Primitive ----------
-  head("Primitive");
-  function sendPrim(keep) {
+  function sendPrim() {
     if (!(primSize > 0)) return say("bad", "✖ Size must be above 0.");
     $("status").textContent = "Building…";
-    worker.postMessage({ type: "primitive", kind: primKind, size: primSize, keep, sid: keep && cur?.sid != null ? cur.sid : ++sidN, name: te.primitives.find((p) => p.id === primKind).label });
+    worker.postMessage({ type: "primitive", kind: primKind, size: primSize, sid: ++sidN, name: te.primitives.find((p) => p.id === primKind).label });
   }
   const kindSel = document.createElement("select");
   te.primitives.forEach((p) => kindSel.add(new Option(p.label, p.id)));
   kindSel.onchange = () => { primKind = kindSel.value; }; // only chooses what "Add primitive" will add
-  panel.append(kindSel);
-  numRow("Size (mm)", te.primitiveSize, () => primSize, (v) => { primSize = v; }, false);
-  const hint = document.createElement("div"); hint.className = "rec";
-  hint.textContent = "Cube: edge length. Cylinder and cone: diameter and height. Sphere and other solids: overall diameter. The type and size above are used by \"Add primitive\" (a new object) or \"Apply to selected primitive\" (changes the selected one).";
-  const bApply = btn("Apply to selected primitive", () => partKind && sendPrim(true));
-  refreshers.push(() => (bApply.disabled = !partKind));
-  panel.append(hint, btn("Add primitive", () => sendPrim(false)), bApply);
+  body.append(kindSel);
+  numRow("Size (mm)", te.primitiveSize, () => primSize, (v) => { primSize = v; }, false, body, "primitiveSize");
+  body.append(btn("Add primitive", sendPrim), btn("Remove selected part", () => cur && list.remove(cur)));
 
-  // ---------- Position and rotation (of the selected object) ----------
-  head("Position and rotation");
-  const pickHint = document.createElement("div"); pickHint.className = "rec";
-  pickHint.textContent = "Click an object in the 3D view or in the Objects list (top right) to move or rotate it: arrows move, rings rotate."; panel.append(pickHint);
+  // ---------- Position and rotation: drop-up at the bottom-left of the 3D view (only in stage B, with an object selected) ----------
+  dropUp = document.createElement("div"); dropUp.style.cssText = "position:absolute;bottom:8px;left:8px;z-index:5;display:none;flex-direction:column-reverse;align-items:flex-start";
+  const upBtn = document.createElement("button"), upMenu = document.createElement("div"); let upOpen = false;
+  upMenu.style.cssText = "display:none;margin-bottom:4px;width:300px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:4px 8px;text-align:left";
+  const paintUp = () => { upBtn.textContent = "Position and rotation " + (upOpen ? "▾" : "▴"); upMenu.style.display = upOpen ? "" : "none"; };
+  upBtn.onclick = () => { upOpen = !upOpen; paintUp(); }; paintUp();
+  document.addEventListener("click", (e) => { if (upOpen && !e.composedPath().includes(dropUp)) { upOpen = false; paintUp(); } });
+  dropUp.append(upBtn, upMenu); view.append(dropUp);
   const bSpace = btn("Space: world", () => { const s = gT.space === "world" ? "local" : "world"; gizmos.forEach((g) => g.setSpace(s)); bSpace.textContent = "Space: " + s; });
-  panel.append(bSpace, btn("Reset position", resetPose), btn("Remove selected part", () => cur && list.remove(cur)));
-  for (const a of ["x", "y", "z"]) numRow(`Position ${a.toUpperCase()} (mm)`, te.position, () => part?.position[a] ?? 0, (v) => (part.position[a] = v));
-  for (const a of ["x", "y", "z"]) numRow(`Rotation ${a.toUpperCase()} (°)`, te.rotation, () => ((part?.rotation[a] ?? 0) * 180) / Math.PI, (v) => (part.rotation[a] = (v * Math.PI) / 180));
+  const tools = document.createElement("div"); tools.append(bSpace, btn("Reset position", resetPose), help("moveRotate")); upMenu.append(tools);
+  for (const a of ["x", "y", "z"]) numRow(`Position ${a.toUpperCase()} (mm)`, te.position, () => part?.position[a] ?? 0, (v) => (part.position[a] = v), true, upMenu);
+  for (const a of ["x", "y", "z"]) numRow(`Rotation ${a.toUpperCase()} (°)`, te.rotation, () => ((part?.rotation[a] ?? 0) * 180) / Math.PI, (v) => (part.rotation[a] = (v * Math.PI) / 180), true, upMenu);
+  syncGizmo();
   refresh();
   // stage C still works with one part: the selected one, or the newest if the flange is selected
   return { getPart: () => part ?? mine[mine.length - 1]?.object ?? null };
