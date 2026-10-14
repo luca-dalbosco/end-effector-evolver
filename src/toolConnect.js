@@ -7,8 +7,7 @@ import { help, segmented, toggle, section } from "./ui.js";
 export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, list }) {
   const dom = renderer.domElement;
   const ADV = { budget: tc.analysisVoxelBudget.default, rmin: tc.filterRadius.default, iters: tc.maxIterations.default, mass: tc.payloadMassKg.default, accel: tc.accelFactor.default, gdir: tc.gravityDirection.default, fx: 0, fy: 0, fz: 0, sp: tc.smooth.passes.default, bh: tc.bridge.voxelSizeMm.default };
-  const vfOf = (id) => tc.strength.options.find((o) => o.id === id).vf;
-  const S = { conn: tc.toolStartConnection.default, h: tc.voxelSize.default, band: tc.designSpace.default, str: tc.strength.default, vf: vfOf(tc.strength.default), print: tc.printReady.default, refineEnd: tc.refineAtEnd.default, bd: tc.bolt.diameterAdjustMm.default, bl: tc.bolt.lengthAdjustMm.default, bshape: tc.bolt.shape.default, bslot: tc.bolt.slotLengthMm.default, method: tc.method.default, waist: tc.bridge.waistPercent.default, ...ADV };
+  const S = { conn: tc.toolStartConnection.default, h: tc.refinement.draftVoxelMm, vt: tc.voxelTarget.default, band: tc.designSpace.default, ref: tc.refinement.default, vf: tc.volumeFraction.default, print: tc.printReady.default, bd: tc.bolt.diameterAdjustMm.default, bl: tc.bolt.lengthAdjustMm.default, bshape: tc.bolt.shape.default, bslot: tc.bolt.slotLengthMm.default, method: tc.method.default, waist: tc.bridge.waistPercent.default, ...ADV };
   let advanced = false, active = false, running = false, worker = null, reqId = 0, optId = 0, timer = null, secPerElem = null, lastStats = null, tStart = 0;
   let bridged = false, chain = false, sag = null, arrow = null, cog = null; // chain: Generate runs optimize → clearance → refine in one go
   let clickMode = "connect", prev = [], result = null, ghost = null, gid = 0, canClear = false, refined = false, coarseGhost = null, predGen = null, predRef = null;
@@ -34,7 +33,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   document.addEventListener("advanced", (e) => {
     if (e.detail.stage !== "C") return;
     advanced = e.detail.on;
-    if (!advanced) { S.vf = vfOf(S.str); S.h = clamp(S.h, tc.voxelSize); S.band = clamp(S.band, tc.designSpace); Object.assign(S, ADV); avoid.forEach((en) => (en.mm = clamp(en.mm, cfgOf(en)))); robot.mm = clamp(robot.mm, tc.avoid.robotOffsetMm); S.bd = clamp(S.bd, tc.bolt.diameterAdjustMm); S.bl = clamp(S.bl, tc.bolt.lengthAdjustMm); S.bslot = clamp(S.bslot, tc.bolt.slotLengthMm); S.waist = clamp(S.waist, tc.bridge.waistPercent); drawRobot(); renderAvoid(); }
+    if (!advanced) { S.vf = clamp(S.vf, tc.volumeFraction); S.band = clamp(S.band, tc.designSpace); S.vt = clamp(S.vt, tc.voxelTarget); Object.assign(S, ADV); applyRef(S.ref); avoid.forEach((en) => (en.mm = clamp(en.mm, cfgOf(en)))); robot.mm = clamp(robot.mm, tc.avoid.robotOffsetMm); S.bd = clamp(S.bd, tc.bolt.diameterAdjustMm); S.bl = clamp(S.bl, tc.bolt.lengthAdjustMm); S.bslot = clamp(S.bslot, tc.bolt.slotLengthMm); S.waist = clamp(S.waist, tc.bridge.waistPercent); drawRobot(); renderAvoid(); }
     sync(); schedule();
   });
   const group = (from) => { const w = document.createElement("div"); w.append(...[...host.children].slice(from)); host.append(w); return w; }; // wraps what was added since `from`, to show or hide it per method
@@ -179,16 +178,64 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   numRow("Design space size", tc.designSpace, "band");
   numRow("Max analysis voxels", tc.analysisVoxelBudget, "budget", () => !advanced);
   head("Design");
-  const qRow = document.createElement("div"); qRow.className = "row"; qRow.innerHTML = "<label>Quality (how long it takes)</label>";
-  const qSel = document.createElement("select"); tc.quality.options.forEach((o) => qSel.add(new Option(o.label, o.id)));
-  qSel.onchange = () => { const o = tc.quality.options.find((x) => x.id === qSel.value); S.budget = o.budget; S.iters = o.iters; sync(); schedule(); };
-  qRow.append(qSel); host.append(qRow);
-  refreshers.push(() => { const o = tc.quality.options.find((x) => x.budget === S.budget && x.iters === S.iters); if (o) qSel.value = o.id; });
-  const stRow = document.createElement("div"); stRow.className = "row"; stRow.innerHTML = "<label>Strength</label>";
-  const stSel = document.createElement("select"); tc.strength.options.forEach((o) => stSel.add(new Option(o.label, o.id)));
-  stSel.onchange = () => { S.str = stSel.value; S.vf = vfOf(S.str); sync(); };
-  stRow.append(stSel); host.append(stRow);
-  numRow("Material share of the design space", tc.volumeFraction, "vf", () => !advanced, false);
+  // Refinement ladder. Draft = design + clearance. Normal and Fine = Refine step on the Draft design at a finer voxel
+  // (Fine = voxel target, Normal = halfway). A level unlocks when the one before it has finished; finished levels are kept.
+  const levels = tc.refinement.levels.map((l) => l.id), lvlName = (id) => tc.refinement.levels.find((l) => l.id === id).label;
+  const lvlVoxel = (id) => (id === "fine" ? S.vt : id === "normal" ? (tc.refinement.draftVoxelMm + S.vt) / 2 : tc.refinement.draftVoxelMm);
+  const applyRef = (id) => { S.ref = id; S.h = lvlVoxel(id); };
+  let reached = {}, gens = {}, workerLevel = null, levelWarn = "", lastDesignSig = null, lastVt = S.vt, runSig = null; // gens[level] = { mesh, vol, over, sag }; workerLevel = level the worker holds now
+  const qRow = document.createElement("div"); qRow.className = "row"; qRow.innerHTML = "<label>Refinement</label>"; qRow.firstChild.append(help("refinement"));
+  const refSeg = segmented(tc.refinement.levels.map((l) => ({ id: l.id, label: l.label })), (id) => selectLevel(id));
+  const lvlHint = document.createElement("div"); lvlHint.className = "rec";
+  qRow.append(refSeg.el, lvlHint); host.append(qRow);
+  numRow("Voxel target size (mm)", tc.voxelTarget, "vt", undefined, false, "voxelTarget");
+  function resetLevels(msg) { const had = Object.values(reached).some(Boolean); reached = {}; gens = {}; workerLevel = null; applyRef(levels[0]); levelWarn = had ? msg : ""; }
+  function storeGen(level, mesh, t, sg) { // a level finished: keep its result so you can switch back to it
+    gens[level] = { mesh, vol: t.volCm3, over: t.overhang, sag: sg }; workerLevel = level;
+    if (t.connected) reached[level] = true; sync();
+  }
+  function selectLevel(id) {
+    applyRef(id); const g = gens[id];
+    if (id === levels[0] && g && workerLevel !== id && worker) { refOut.textContent = "Going back to the Draft…"; worker.postMessage({ type: "restore" }); } // the worker holds the Draft design; this also re-clears it
+    else if (g) { clearCoarseGhost(); showResult(g.mesh); vol = g.vol; over = g.over; sag = g.sag; canClear = true; showSummary(); }
+    sync();
+  }
+  refreshers.push(() => {
+    const dsig = JSON.stringify([S.vf, S.rmin, S.iters, S.budget, S.mass, S.accel, S.gdir, S.fx, S.fy, S.fz]);
+    if (lastDesignSig !== null && dsig !== lastDesignSig && reached.draft) resetLevels("⚠ A design or load setting changed after the Draft, so Normal and Fine are locked again. Generate the Draft again.");
+    lastDesignSig = dsig;
+    if (S.vt !== lastVt) {
+      lastVt = S.vt;
+      if (gens.normal || gens.fine) { delete gens.normal; delete gens.fine; delete reached.normal; delete reached.fine; levelWarn = "⚠ The voxel target size changed, so Normal and Fine need to be refined again."; if (S.ref !== levels[0]) setTimeout(() => selectLevel(levels[0])); }
+    }
+    if (S.ref !== levels[0]) S.h = lvlVoxel(S.ref);
+    levels.forEach((id, i) => refSeg.enable(id, i === 0 || !!reached[levels[i - 1]], i ? `Finish ${lvlName(levels[i - 1])} first: ${lvlName(id)} refines the ${lvlName(levels[0])} design and needs ${lvlName(levels[i - 1])} done.` : ""));
+    refSeg.set(S.ref);
+    lvlHint.className = levelWarn ? "warn" : "rec";
+    lvlHint.textContent = levelWarn || (!reached.draft ? "↳ Finish Draft to unlock Normal." : !reached.normal ? "↳ Finish Normal to unlock Fine." : "↳ All levels done. Click a level to switch between the results.");
+    const lv = S.ref, ok = lv === levels[0] ? !!lastStats : !!(lastStats && reached[levels[levels.indexOf(lv) - 1]] && canClear && canRefine());
+    bGo.textContent = lv === levels[0] ? "Generate Draft" : (gens[lv] ? "Re-run " : "Refine to ") + lvlName(lv);
+    if (!running) bGo.disabled = !ok;
+  });
+  // what the design space depends on: used to keep results when you come back to this tab without changing anything
+  const r3 = (v) => Math.round(v * 1000) / 1000;
+  const inputSig = () => JSON.stringify([picked.map((p) => p.key), avoid.map((a) => [a.key, a.mm]),
+    list.items().filter((i) => i.deletable !== false).map((i) => [i.id, i.object.position.toArray().map(r3), [i.object.rotation.x, i.object.rotation.y, i.object.rotation.z].map(r3)]),
+    S.band, S.budget, S.print, S.conn, S.bd, S.bl, S.bshape, S.bslot, robot.mm, getStart()?.dims]);
+  // Material amount (%): slider from volumeFraction, with a weight estimate (design-space volume × amount × PLA density)
+  const maRow = document.createElement("div"); maRow.className = "row"; maRow.innerHTML = "<label>Material amount (%)</label>"; maRow.firstChild.append(help("materialAmount"));
+  const maR = Object.assign(document.createElement("input"), { type: "range", min: tc.volumeFraction.min * 100, max: tc.volumeFraction.max * 100, step: 1 });
+  const maN = Object.assign(document.createElement("input"), { type: "number", step: 1 }), maW = document.createElement("div"); maW.className = "rec";
+  const setVf = (pct) => { S.vf = Math.round(pct) / 100; sync(); };
+  maR.oninput = () => setVf(+maR.value);
+  maN.onchange = () => { let v = +maN.value; if (maN.value === "" || isNaN(v)) return; if (!advanced) v = Math.min(tc.volumeFraction.max * 100, Math.max(tc.volumeFraction.min * 100, v)); setVf(v); };
+  maRow.append(maR, maN, maW); host.append(maRow);
+  const updWeight = () => {
+    const pct = Math.round(S.vf * 100), rec = tc.volumeFraction.recommendedRange;
+    maR.value = maN.value = pct; maN.className = S.vf >= rec[0] && S.vf <= rec[1] ? "ok" : "warn";
+    maW.textContent = lastStats ? `≈ ${Math.round(lastStats.count * lastStats.h ** 3 / 1000 * S.vf * tc.material.densityGcm3)} g (design space × ${pct}% × ${tc.material.label})` : "Weight estimate appears when a design space is ready.";
+  };
+  refreshers.push(updWeight);
   numRow("Filter radius (voxels)", tc.filterRadius, "rmin", () => !advanced);
   numRow("Max steps", tc.maxIterations, "iters", () => !advanced);
   head("Load");
@@ -229,13 +276,10 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const brG = group(fromBr), fromOpt2 = host.children.length;
   head("Generate");
   const genNote = document.createElement("div"); genNote.className = "rec";
-  genNote.textContent = "One click: designs the connector, clears the red zones, the robot side, Flange Clearance and Bolt Clearance (orange ghost = the gap around red items), drops loose pieces, then refines on the finer voxel if ticked.";
-  const rfL = document.createElement("label"), rfC = Object.assign(document.createElement("input"), { type: "checkbox" });
-  rfC.onchange = () => { S.refineEnd = rfC.checked; sync(); }; rfL.append(rfC, " Refine at the end (finer, slower)"); rfL.title = tc.refineAtEnd.note;
-  host.append(genNote, rfL);
-  numRow("Refined voxel size (mm)", tc.voxelSize, "h", () => !S.refineEnd && !advanced, false);
+  genNote.textContent = "Draft: designs the connector and clears the red zones, Flange Clearance and Bolt Clearance (orange ghost = the gap around red items), drops loose pieces. Normal and Fine refine the Draft on a finer voxel.";
+  host.append(genNote);
   const typ = document.createElement("div"); typ.style.cssText = "font-size:12px;margin-bottom:6px"; host.append(typ);
-  const bGo = btn("Generate design", () => generate()), bStop = btn("Stop", () => { chain = false; worker?.postMessage({ type: "stop" }); });
+  const bGo = btn("Generate Draft", () => (S.ref === levels[0] ? generate() : refine())), bStop = btn("Stop", () => { chain = false; worker?.postMessage({ type: "stop" }); });
   bGo.disabled = true; bStop.disabled = true;
   const bar = Object.assign(document.createElement("progress"), { max: 1, value: 0 }); bar.style.cssText = "width:100%;margin-top:6px";
   const prog = document.createElement("div"); prog.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
@@ -243,16 +287,9 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const stick = document.createElement("div"); stick.style.cssText = "position:sticky;bottom:0;z-index:3;background:var(--bg);padding:6px 0;border-top:1px solid var(--line)";
   stick.append(bGo, bStop, bar); host.append(stick, prog, clrOut);
   const rfBar = Object.assign(document.createElement("progress"), { max: 1, value: 0 }); rfBar.style.cssText = "width:100%;margin-top:6px";
-  const rfHint = document.createElement("div"), refOut = document.createElement("div"); rfHint.className = "rec"; refOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
-  const bRefine = btn("Refine again", () => refine()), bBack = btn("Back to coarse result", () => { if (worker) { refOut.textContent = "Going back…"; worker.postMessage({ type: "restore" }); } });
-  const rfAdv = document.createElement("div"); rfAdv.append(bRefine, bBack, rfHint);
-  host.append(rfAdv, rfBar, refOut);
+  const refOut = document.createElement("div"); refOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
+  host.append(rfBar, refOut);
   const canRefine = () => canClear && lastStats && lastStats.h > S.h * 1.001;
-  refreshers.push(() => {
-    rfC.checked = S.refineEnd; rfAdv.style.display = advanced ? "" : "none";
-    bRefine.disabled = running || !canRefine(); bBack.disabled = running || !refined;
-    rfHint.textContent = !lastStats || !canClear ? "Generate a design first." : canRefine() ? `Analysis voxel ${lastStats.h.toFixed(2)} mm → refined voxel ${S.h} mm.` : "The analysis voxel is already as fine as the voxel size. Lower the refined voxel size to refine.";
-  });
   const sumOut = document.createElement("div"); sumOut.style.cssText = "font-size:13px;line-height:1.6;margin-top:8px;font-weight:600"; host.append(sumOut);
   let vol = null, over = null;
   function showSummary() { // weight and sag readout of the current result
@@ -282,12 +319,12 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const optB = group(fromOpt2);
   refreshers.push(() => { meth.set(S.method); optA.style.display = optB.style.display = S.method === "optimize" ? "" : "none"; brG.style.display = S.method === "bridge" ? "" : "none"; });
   refreshers.push(() => {
-    bSmooth.disabled = bCut.disabled = bUnsmooth.disabled = running || !canClear;
+    bSmooth.disabled = bCut.disabled = bUnsmooth.disabled = running || !canClear || workerLevel !== S.ref;
     const o = tc.smooth.strength.options.find((x) => x.passes === S.sp); if (o) smSel.value = o.id;
   });
   const selfBox = document.createElement("div"), selfOut = document.createElement("div"); selfOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
   selfBox.append(btn("Run solver self-test", () => { selfOut.textContent = "Running…"; ensureWorker().postMessage({ type: "selftest" }); }), selfOut); host.append(selfBox);
-  refreshers.push(() => { sel.value = S.conn; stSel.value = S.str; pr.set(S.print); gSel.value = S.gdir; gRow.style.display = advanced ? "" : "none"; selfBox.style.display = advanced ? "" : "none"; });
+  refreshers.push(() => { sel.value = S.conn; pr.set(S.print); gSel.value = S.gdir; gRow.style.display = advanced ? "" : "none"; selfBox.style.display = advanced ? "" : "none"; });
 
   function setLock(on) {
     running = on; panel.querySelectorAll("input,select,button").forEach((x) => (x.disabled = on));
@@ -431,7 +468,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   function ghostPreview() { if (worker && lastStats && !running) worker.postMessage({ type: "clearPreview", id: ++gid }); }
   function applyClearance() { if (!worker || !canClear) return; clrOut.textContent = "Clearing…"; worker.postMessage({ type: "clear" }); }
   const keep = (f) => { const v = vol, s = sag, o = over; f(); vol = v; sag = s; over = o; showSummary(); }; // showResult clears the readout
-  function setPrev(d, s, a) { refined = false; refOut.textContent = ""; clearCoarseGhost(); clearPrev(); clearResult(); prev = [meshOf(d, domMat), meshOf(s, srcMat)]; if (a && a.i.length) prev.push(meshOf(a, avoidMat)); }
+  function setPrev(d, s, a) { resetLevels("⚠ The setup changed, so you start again at Draft."); refined = false; refOut.textContent = ""; clearCoarseGhost(); clearPrev(); clearResult(); prev = [meshOf(d, domMat), meshOf(s, srcMat)]; if (a && a.i.length) prev.push(meshOf(a, avoidMat)); }
   const showResult = (d) => { clearResult(); result = meshOf(d, resMat); };
 
   function showEstimate() {
@@ -470,7 +507,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     }
     if (m.type === "restored") {
       if (!m.ok) { refOut.innerHTML = `<span class="bad">✖ ${m.error}</span>`; return; }
-      clearCoarseGhost(); showResult(m.mesh); canClear = true; refined = false; refOut.innerHTML = `<span class="ok">Back to the coarse result.</span>`; sync();
+      clearCoarseGhost(); showResult(m.mesh); canClear = true; refined = false; workerLevel = levels[0]; refOut.innerHTML = `<span class="ok">Draft design.</span>`; sync();
       applyClearance(); // reads the weight and overhangs of the coarse result again
       return;
     }
@@ -489,7 +526,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
       setLock(false);
       if (!m.ok) { refOut.innerHTML = `<span class="bad">✖ ${m.error}</span>`; if (coarseGhost && !result) { result = coarseGhost; result.material = resMat; coarseGhost = null; } return; }
       if (!m.stopped && predRef && secPerElem != null) learn("ref", m.elapsed, refWork(predRef.count, m.it) * secPerElem * 1000);
-      showResult(m.mesh); canClear = true; refined = true; rfBar.value = m.stopped ? rfBar.value : 1; sync();
+      showResult(m.mesh); canClear = true; refined = true; rfBar.value = m.stopped ? rfBar.value : 1; if (!m.stopped) storeGen(S.ref, m.mesh, m.stats, m.sag); sync();
       const t = m.stats; vol = t.volCm3; over = t.overhang; sag = m.sag; showSummary();
       refOut.innerHTML = `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔" : "⚠ The robot side and the tool are no longer connected."} Refine ${m.stopped ? "stopped" : "finished"} after ${m.it} steps in ${fmt(m.elapsed)}. Voxel ${m.h.toFixed(2)} mm (analysis was ${m.hc.toFixed(2)} mm).` + (advanced ? `<br>Stiffness: ${(m.c0 / m.c).toFixed(2)}× the coarse design. Material: ${((m.vol / m.cap) * 100).toFixed(0)}% of the coarse volume. ${t.islands.toLocaleString()} loose voxels dropped.` : "") + "</span>";
       return;
@@ -520,7 +557,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
       const t = m.stats; keep(() => showResult(m.mesh)); canClear = true;
       vol = t.volCm3; over = t.overhang; showSummary();
       clrOut.innerHTML = `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔ Cleared" : "⚠ The robot side and the tool are no longer connected"}: ${t.cut.toLocaleString()} voxels deleted in the zones, ${t.islands.toLocaleString()} loose voxels dropped.</span>`;
-      if (chain && S.refineEnd && canRefine()) { chain = false; refine(); return; }
+      if (chain) storeGen(levels[0], m.mesh, t, sag);
       if (chain) { chain = false; setLock(false); } else sync();
       return;
     }
@@ -544,7 +581,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     }
     if (m.id !== reqId) return; // design space result
     if (!m.ok) { lastStats = null; bGo.disabled = true; clearPrev(); return setInfo("bad", "✖ " + m.error); }
-    lastStats = m.stats; bGo.disabled = false; setPrev(m.dom, m.src, m.avoid); showEstimate(); ghostPreview();
+    lastStats = m.stats; bGo.disabled = false; setPrev(m.dom, m.src, m.avoid); showEstimate(); ghostPreview(); updWeight();
   }
   function ensureWorker() {
     if (!worker) { worker = new Worker(new URL("./voxelWorker.js", import.meta.url), { type: "module" }); worker.onmessage = onMsg; worker.postMessage({ type: "bench" }); }
@@ -557,7 +594,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     if (!picked.length) { cog = null; drawArrow(); lastStats = null; bGo.disabled = true; clearPrev(); clearResult(); return setInfo("warn", "Pick \"Connect face\" and click one or more faces of the tool objects. They turn green."); }
     cog = solidCentroid(endTris(true)); drawArrow();
     if (S.method === "bridge") return runBridge(st);
-    ensureWorker(); bGo.disabled = true; drawRobot();
+    ensureWorker(); bGo.disabled = true; drawRobot(); runSig = inputSig();
     const R = startR(st.dims);
     const a = startTris(st, false), b = endTris(false), sa = startTris(st, true), ea = endTris(true), av = avoidData(), ko = keepOut();
     setInfo("", "Computing design space…");
@@ -579,7 +616,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   }
   function generate() {
     if (!lastStats || !worker) return;
-    refined = false; refOut.textContent = ""; clearCoarseGhost(); chain = false;
+    refined = false; refOut.textContent = ""; clearCoarseGhost(); chain = false; reached = {}; gens = {}; workerLevel = null; levelWarn = "";
     predGen = lastStats.count * tc.estimate.cgIterationsPerStep * S.iters * tc.estimate.overheadFactor; // × secPerElem × 1000 = ms before learning
     clearResult(); prev.forEach((x) => (x.visible = false));
     setLock(true); bar.value = 0; tStart = performance.now(); prog.textContent = "Starting… the first step is the slowest.";
@@ -590,7 +627,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     active = e.detail === "C"; list.setVis(robotRow, active ? 1 : 2); list.setVis(boltRow, active ? 1 : 2); if (ghost) ghost.visible = active; if (arrow) arrow.visible = active && S.method === "optimize"; if (coarseGhost) coarseGhost.visible = active; panel.style.display = active ? "" : "none";
     prev.forEach((m) => (m.visible = active && !result)); if (result) result.visible = active || e.detail === "D"; // stage D (Export) shows the connector too
     if (active) renderAvoid();
-    if (active && !running) { sync(); run(); }
+    if (active && !running) { sync(); if (S.method !== "optimize" || !lastStats || inputSig() !== runSig) run(); }
   });
   const legend = document.createElement("div"); // colour key, only in stage 3
   legend.style.cssText = "position:absolute;bottom:8px;right:8px;z-index:5;display:none;font-size:11px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:4px 8px;line-height:1.5";

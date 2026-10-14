@@ -48,7 +48,8 @@ export function segmented(options, onChange) {
   const box = el("div", "seg");
   const btns = options.map((o) => { const b = el("button", "", o.label); b.type = "button"; b.dataset.id = o.id; b.onclick = () => { set(o.id); onChange(o.id); }; box.append(b); return b; });
   const set = (id) => btns.forEach((b) => b.classList.toggle("on", b.dataset.id === id));
-  return { el: box, set };
+  const enable = (id, on, tip = "") => btns.forEach((b) => { if (b.dataset.id === id) { b.disabled = !on; b.title = on ? "" : tip; } }); // greyed out with a hover tip
+  return { el: box, set, enable };
 }
 
 // Tab status (✔ / ⚠ on each tab) and the Next button at the bottom of the side panel.
