@@ -1,4 +1,5 @@
 // Footer links (bottom-right). Edit the text and URLs in the two blocks below.
+import { TUTORIAL_STEPS } from './tutorialSteps.js';
 
 const LINKS = {
   donate: 'https://www.buymeacoffee.com/YOUR-NAME',      // <- put your real link
@@ -35,13 +36,6 @@ const WELCOME = {
   video: '', // <- put the intro video URL here (empty = shows "coming soon")
   intro: `<p>Welcome! This tool builds a 3D-printable connector between your robot flange and your own part.</p>
     <p>Everything runs in your browser. Nothing is uploaded.</p>`,
-  steps: [
-    'Pick your robot flange (tab 1 Robot side).',
-    'Upload your part as a STEP file, or add a simple shape (tab 2 Tool).',
-    'Click the faces to connect and choose Bridge or Voxel (tab 3 Connector).',
-    'Press Generate.',
-    'Export and print (tab 4 Export).',
-  ],
 };
 const WELCOME_KEY = 'welcomeHide'; // localStorage: '1' = do not open on start
 
@@ -123,11 +117,32 @@ const CSS = `
 .footer-links a{color:inherit;text-decoration:none;cursor:pointer}
 .footer-links a:hover{text-decoration:underline}
 dialog.footer-dialog{max-height:80vh;overflow:auto;max-width:480px;width:90vw;border:1px solid #8884;
-  border-radius:8px;padding:20px;background:Canvas;color:CanvasText;
+  border-radius:8px;padding:20px;background:var(--bg,Canvas);color:var(--fg,CanvasText);
   font:14px/1.5 system-ui,sans-serif}
 dialog.footer-dialog::backdrop{background:#0008}
 dialog.footer-dialog h2{margin:0 0 10px;font-size:18px}
 dialog.footer-dialog button{margin-top:12px;margin-right:6px;cursor:pointer}
+dialog.footer-dialog[data-welcome="1"]{max-width:560px}
+.tv-scene{background:var(--chip,#2b2c30);border:1px solid var(--line,#3a3b3f);border-radius:8px;padding:6px}
+.tv-strip{display:flex;margin:6px 0 10px;border:1px solid var(--line,#3a3b3f);border-radius:6px;font:12px ui-monospace,monospace}
+.tv-strip span{flex:1;padding:6px 8px;text-align:center}.tv-strip span+span{border-left:1px solid var(--line,#3a3b3f)}
+.tv-strip small{display:block;opacity:.5;font-size:9px;letter-spacing:.08em}
+.tv-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.tv-pill{font-size:11px;padding:3px 9px;border:1px solid #8886;border-radius:99px;opacity:.55;cursor:pointer}
+.tv-pill.on{opacity:1;border-color:#2f7de1;background:#2f7de122}
+.tv-scene svg *{transform-box:fill-box;transform-origin:center}
+.tv-drop{animation:tv-drop .6s ease-out both}.tv-slide{animation:tv-slide .7s ease-out both}
+.tv-pop{animation:tv-pop .4s ease-out both}.tv-pulse{animation:tv-pulse 1.4s ease-in-out infinite}
+.tv-draw{animation:tv-draw 1.2s ease-out both}.tv-rise{animation:tv-rise .6s ease-out both}
+.tv-nozzle{animation:tv-noz 2.4s ease-in-out 1s infinite alternate}
+@keyframes tv-rise{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}
+@keyframes tv-noz{from{transform:translateX(-16px)}to{transform:translateX(16px)}}
+@keyframes tv-drop{from{transform:translateY(-28px);opacity:0}to{transform:none;opacity:1}}
+@keyframes tv-slide{from{transform:translateX(60px);opacity:0}to{transform:none;opacity:1}}
+@keyframes tv-pop{from{transform:scale(.6);opacity:0}to{transform:none;opacity:1}}
+@keyframes tv-pulse{50%{opacity:.35}}
+@keyframes tv-draw{to{stroke-dashoffset:0}}
+@media (prefers-reduced-motion:reduce){.tv-scene svg *{animation:none!important}}
 dialog.footer-dialog .wel-foot{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12px}
 dialog.footer-dialog .wel-foot label{margin-right:auto}
 dialog.footer-dialog .wel-foot button{margin:0}
@@ -144,20 +159,24 @@ export function initFooterLinks() {
   // click on the dark backdrop closes the pop-up
   dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
 
-  // Welcome pop-up: page 1 = welcome + video, page 2 = the 5 steps. "Don't show again" is ticked by default (first visit only).
+  // Welcome pop-up: page 0 = welcome + video, pages 1-5 = the tutorial steps with a diagram. "Don't show again" is ticked by default (first visit only).
   const store = (v) => { try { v === undefined ? null : localStorage.setItem(WELCOME_KEY, v); return localStorage.getItem(WELCOME_KEY); } catch (e) { return null; } };
-  function openWelcome(page = 1) {
-    const last = page === 2;
-    const body = last
-      ? `<h2>The 5 steps</h2><ol>${WELCOME.steps.map((s) => `<li>${s}</li>`).join('')}</ol>`
-      : `<h2>Welcome</h2>${WELCOME.intro}<p>${WELCOME.video ? `<a href="${WELCOME.video}" target="_blank" rel="noopener">▶ Watch the intro video</a>` : '▶ Intro video: coming soon.'}</p>`;
-    dialog.innerHTML = `${body}<div class="wel-foot"><label><input type="checkbox" id="wel-hide"> Don't show again</label>${last ? '<button id="wel-back">Back</button>' : '<button id="wel-skip">Skip</button>'}<button id="wel-next">${last ? 'Done' : 'Next →'}</button></div>`;
+  const N = TUTORIAL_STEPS.length;
+  function openWelcome(page = 0) {
+    const first = page === 0, last = page === N;
+    const st = TUTORIAL_STEPS[page - 1];
+    const body = first
+      ? `<h2>Welcome</h2>${WELCOME.intro}<p>${WELCOME.video ? `<a href="${WELCOME.video}" target="_blank" rel="noopener">▶ Watch the intro video</a>` : '▶ Intro video: coming soon.'}</p>`
+      : `<h2>${page} · ${st.title}</h2>${st.html}${st.strip}<p>${st.text}</p>`;
+    const dots = TUTORIAL_STEPS.map((x, i) => `<a class="tv-pill${i + 1 === page ? ' on' : ''}" data-p="${i + 1}">${i + 1} ${x.pill}</a>`).join('');
+    dialog.innerHTML = `${body}<div class="tv-pills">${dots}</div><div class="wel-foot"><label><input type="checkbox" id="wel-hide"> Don't show again</label>${first ? '<button id="wel-skip">Skip</button>' : '<button id="wel-back">Back</button>'}<button id="wel-next">${last ? 'Done' : 'Next →'}</button></div>`;
     const hide = dialog.querySelector('#wel-hide'); hide.checked = openWelcome.hide ?? true;
     hide.onchange = () => { openWelcome.hide = hide.checked; };
     const close = () => dialog.close();
-    dialog.querySelector('#wel-next').onclick = () => (last ? close() : openWelcome(2));
-    if (last) dialog.querySelector('#wel-back').onclick = () => openWelcome(1);
-    else dialog.querySelector('#wel-skip').onclick = close;
+    dialog.querySelectorAll('.tv-pill').forEach((p) => { p.onclick = () => openWelcome(+p.dataset.p); });
+    dialog.querySelector('#wel-next').onclick = () => (last ? close() : openWelcome(page + 1));
+    if (first) dialog.querySelector('#wel-skip').onclick = close;
+    else dialog.querySelector('#wel-back').onclick = () => openWelcome(page - 1);
     dialog.dataset.welcome = '1';
     if (!dialog.open) dialog.showModal();
   }
@@ -169,7 +188,7 @@ export function initFooterLinks() {
     const a = document.createElement('a');
     a.textContent = item.label;
     if (item.action === 'welcome') {
-      a.addEventListener('click', () => openWelcome(1));
+      a.addEventListener('click', () => openWelcome(0));
     } else if (item.href) {
       a.href = item.href;
       if (item.href.startsWith('http')) { a.target = '_blank'; a.rel = 'noopener'; }
@@ -185,5 +204,5 @@ export function initFooterLinks() {
     nav.appendChild(a);
   }
   document.body.appendChild(nav);
-  if (store() !== '1') openWelcome(1); // first visit
+  if (store() !== '1') openWelcome(0); // first visit
 }
