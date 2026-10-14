@@ -2,7 +2,7 @@
 import * as THREE from "three";
 import tc from "../data/toolConnect.json";
 import { solidCentroid } from "./voxelize.js";
-import { help, segmented } from "./ui.js";
+import { help, segmented, toggle, section } from "./ui.js";
 
 export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, list }) {
   const dom = renderer.domElement;
@@ -21,11 +21,12 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const robot = { mm: tc.avoid.robotOffsetMm.default }; // "Flange Clearance": offset of the always-red cylinder below the tool start
   const avoid = []; // red items: { key, kind: "obj" | "face", it (list row), obj (its 3D group), fi (face), mm, ov (red overlay) }
   const panel = document.createElement("div"); panel.style.display = "none"; $("exportA").after(panel);
+  let host = panel; // controls are added to the current section body
   const refreshers = [], sync = () => refreshers.forEach((f) => f());
   const clamp = (v, c) => Math.min(c.max, Math.max(c.min, v));
   const schedule = () => { if (running) return; clearTimeout(timer); timer = setTimeout(run, 300); };
   const fmt = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`; };
-  const head = (t) => { const b = document.createElement("div"); b.textContent = t; b.style.cssText = "font-weight:700;margin:14px 0 4px"; panel.append(b); return b; };
+  const head = (t) => { const b = document.createElement("div"); b.textContent = t; b.style.cssText = "font-weight:700;margin:14px 0 4px"; host.append(b); return b; };
 
   const btn = (label, fn) => Object.assign(document.createElement("button"), { textContent: label, onclick: fn });
 
@@ -36,41 +37,38 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     if (!advanced) { S.vf = vfOf(S.str); S.h = clamp(S.h, tc.voxelSize); S.band = clamp(S.band, tc.designSpace); Object.assign(S, ADV); avoid.forEach((en) => (en.mm = clamp(en.mm, cfgOf(en)))); robot.mm = clamp(robot.mm, tc.avoid.robotOffsetMm); S.bd = clamp(S.bd, tc.bolt.diameterAdjustMm); S.bl = clamp(S.bl, tc.bolt.lengthAdjustMm); S.bslot = clamp(S.bslot, tc.bolt.slotLengthMm); S.waist = clamp(S.waist, tc.bridge.waistPercent); drawRobot(); renderAvoid(); }
     sync(); schedule();
   });
-  const group = (from) => { const w = document.createElement("div"); w.append(...[...panel.children].slice(from)); panel.append(w); return w; }; // wraps what was added since `from`, to show or hide it per method
-  const mRow = document.createElement("div"); mRow.className = "row"; mRow.innerHTML = "<label>Method</label>";
-  const mSel = document.createElement("select"); tc.method.options.forEach((o) => mSel.add(new Option(o.label, o.id)));
-  mSel.onchange = () => { S.method = mSel.value; refined = false; refOut.textContent = ""; clearCoarseGhost(); clearPrev(); clearResult(); lastStats = null; setInfo("", ""); sync(); run(); };
-  mRow.append(mSel); panel.append(mRow);
+  const group = (from) => { const w = document.createElement("div"); w.append(...[...host.children].slice(from)); host.append(w); return w; }; // wraps what was added since `from`, to show or hide it per method
+  const prep = section("Preparation"); panel.appendChild(prep.box); host = prep.body;
 
   head("Robot side surface");
   const sel = document.createElement("select");
   tc.toolStartConnection.options.forEach((o) => sel.add(new Option(o.label, o.id)));
   sel.onchange = () => { S.conn = sel.value; schedule(); };
-  panel.append(sel);
+  host.append(sel);
 
   head("Click tool").append(help("clickTool"));
   const tool = segmented([{ id: "connect", label: "Connect face" }, { id: "face", label: "Avoid face" }, { id: "object", label: "Avoid object" }], (id) => { clickMode = id; });
-  tool.set(clickMode); panel.append(tool.el);
+  tool.set(clickMode); host.append(tool.el);
 
   head("Connection faces");
   const connBox = document.createElement("div"); connBox.style.cssText = "font-size:12px";
-  panel.append(connBox, btn("Clear connection faces", () => { picked.splice(0).forEach(dropEntry); renderAvoid(); sync(); schedule(); }));
+  host.append(connBox, btn("Clear connection faces", () => { picked.splice(0).forEach(dropEntry); renderAvoid(); sync(); schedule(); }));
   head("Avoid objects");
-  const objBox = document.createElement("div"); objBox.style.cssText = "font-size:12px"; panel.append(objBox);
+  const objBox = document.createElement("div"); objBox.style.cssText = "font-size:12px"; host.append(objBox);
   head("Avoid faces");
   const faceBox = document.createElement("div"); faceBox.style.cssText = "font-size:12px";
-  panel.append(faceBox, btn("Clear avoided", () => { avoid.splice(0).forEach(dropEntry); renderAvoid(); schedule(); }));
+  host.append(faceBox, btn("Clear avoided", () => { avoid.splice(0).forEach(dropEntry); renderAvoid(); schedule(); }));
   head("Bolt Clearance").append(help("boltClearance"));
-  const boltInfo = document.createElement("div"); boltInfo.style.cssText = "font-size:12px;margin-bottom:4px"; panel.append(boltInfo);
+  const boltInfo = document.createElement("div"); boltInfo.style.cssText = "font-size:12px;margin-bottom:4px"; host.append(boltInfo);
   absRow("Diameter (mm)", tc.bolt.diameterAdjustMm, "bd", () => getStart()?.dims.headD ?? null);
   absRow("Height (mm)", tc.bolt.lengthAdjustMm, "bl", () => { const sc = getStart()?.dims.screws; return sc?.headH != null ? sc.headH + tc.bolt.lengthMarginMm : null; });
   const bsRow = document.createElement("div"); bsRow.className = "row"; bsRow.innerHTML = "<label>Shape</label>";
   const bsSel = document.createElement("select"); tc.bolt.shape.options.forEach((o) => bsSel.add(new Option(o.label, o.id)));
   bsSel.onchange = () => { S.bshape = bsSel.value; sync(); drawRobot(); schedule(); };
-  bsRow.append(bsSel); panel.append(bsRow);
+  bsRow.append(bsSel); host.append(bsRow);
   refreshers.push(() => (bsSel.value = S.bshape));
   numRow("Slot length (mm)", tc.bolt.slotLengthMm, "bslot", () => S.bshape !== "slot");
-  panel.append(btn("Reset bolt clearance", () => { S.bd = tc.bolt.diameterAdjustMm.default; S.bl = tc.bolt.lengthAdjustMm.default; S.bshape = tc.bolt.shape.default; S.bslot = tc.bolt.slotLengthMm.default; sync(); drawRobot(); schedule(); }));
+  host.append(btn("Reset bolt clearance", () => { S.bd = tc.bolt.diameterAdjustMm.default; S.bl = tc.bolt.lengthAdjustMm.default; S.bshape = tc.bolt.shape.default; S.bslot = tc.bolt.slotLengthMm.default; sync(); drawRobot(); schedule(); }));
   refreshers.push(() => { const b = keepOut()?.bolts, sc = b?.filter((x) => !x.pin), pin = b?.find((x) => x.pin); boltInfo.textContent = b ? `Above each of the ${sc.length} screws${S.bshape === "slot" ? `, as a slot running ${S.bslot} mm outward` : ""}.` + (pin ? ` Above the dowel: Ø ${(2 * pin.r).toFixed(2)} mm.` : "") : "No screw data for this flange."; });
   const cfgOf = (en) => (en.kind === "face" ? tc.avoid.faceExtrudeMm : tc.avoid.objectGrowMm);
   function renderAvoid() {
@@ -151,14 +149,14 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     const rnd = (v) => Math.round(v * 100) / 100, rec = cfg.recommendedRange;
     r.oninput = () => { const b = base(); if (b == null) return; S[key] = rnd(+r.value - b); sync(); drawRobot(); }; r.onchange = () => schedule();
     n.onchange = () => { const b = base(); let v = +n.value; if (b == null || n.value === "" || isNaN(v)) return; v -= b; if (!advanced) v = clamp(v, cfg); S[key] = rnd(v); sync(); drawRobot(); schedule(); };
-    d.append(l, r, n); panel.append(d);
+    d.append(l, r, n); host.append(d);
     refreshers.push(() => {
       const b = base(); d.classList.toggle("off", b == null); if (b == null) return;
       r.min = rnd(b + cfg.min); r.max = rnd(b + cfg.max); r.value = n.value = rnd(b + S[key]);
       n.className = rec ? (S[key] >= rec[0] && S[key] <= rec[1] ? "ok" : "warn") : "";
     });
   }
-  function numRow(label, cfg, key, hidden = () => false, rerun = true) {
+  function numRow(label, cfg, key, hidden = () => false, rerun = true, helpId) {
     const d = document.createElement("div"); d.className = "row";
     const l = Object.assign(document.createElement("label"), { textContent: label });
     const r = Object.assign(document.createElement("input"), { type: "range", min: cfg.min, max: cfg.max, step: cfg.step });
@@ -167,15 +165,16 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     const rec = cfg.recommendedRange; note.textContent = (rec ? `recommended ${rec[0]} to ${rec[1]}. ` : "") + (cfg.note ?? "");
     r.oninput = () => { S[key] = +r.value; sync(); if (key === "bslot") drawRobot(); }; r.onchange = () => rerun && schedule();
     n.onchange = () => { let v = +n.value; if (n.value === "" || isNaN(v)) return; if (!advanced) v = clamp(v, cfg); S[key] = v; sync(); if (key === "bslot") drawRobot(); if (rerun) schedule(); };
-    d.append(l, r, n, note); panel.append(d);
+    if (helpId) l.append(help(helpId)); d.append(l, r, n, note); host.append(d);
     refreshers.push(() => { r.value = n.value = S[key]; d.style.display = hidden() ? "none" : ""; n.className = rec ? (S[key] >= rec[0] && S[key] <= rec[1] ? "ok" : "warn") : ""; });
   }
-  head("Print");
-  const prL = document.createElement("label"), prC = Object.assign(document.createElement("input"), { type: "checkbox" }), prNote = document.createElement("div");
-  prC.onchange = () => { S.print = prC.checked; schedule(); };
-  prL.append(prC, " Print-ready (test): flange face on the bed, 45° overhangs, no supports"); prNote.className = "rec"; prNote.textContent = tc.printReady.note;
-  panel.append(prL, prNote);
-  const fromOpt = panel.children.length;
+  const pr = toggle("Printable without supports (test)", (v) => { S.print = v; schedule(); }, "printable"); host.append(pr.el);
+  const gen = section("Generation"); panel.appendChild(gen.box); host = gen.body;
+  const meth = segmented([{ id: "bridge", label: "Bridge" }, { id: "optimize", label: "Voxel" }], (id) => {
+    S.method = id; refined = false; refOut.textContent = ""; clearCoarseGhost(); clearPrev(); clearResult(); lastStats = null; setInfo("", ""); sync(); run();
+  });
+  host.append(meth.el);
+  const fromOpt = host.children.length;
   head("Voxels");
   numRow("Design space size", tc.designSpace, "band");
   numRow("Max analysis voxels", tc.analysisVoxelBudget, "budget", () => !advanced);
@@ -183,22 +182,22 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const qRow = document.createElement("div"); qRow.className = "row"; qRow.innerHTML = "<label>Quality (how long it takes)</label>";
   const qSel = document.createElement("select"); tc.quality.options.forEach((o) => qSel.add(new Option(o.label, o.id)));
   qSel.onchange = () => { const o = tc.quality.options.find((x) => x.id === qSel.value); S.budget = o.budget; S.iters = o.iters; sync(); schedule(); };
-  qRow.append(qSel); panel.append(qRow);
+  qRow.append(qSel); host.append(qRow);
   refreshers.push(() => { const o = tc.quality.options.find((x) => x.budget === S.budget && x.iters === S.iters); if (o) qSel.value = o.id; });
   const stRow = document.createElement("div"); stRow.className = "row"; stRow.innerHTML = "<label>Strength</label>";
   const stSel = document.createElement("select"); tc.strength.options.forEach((o) => stSel.add(new Option(o.label, o.id)));
   stSel.onchange = () => { S.str = stSel.value; S.vf = vfOf(S.str); sync(); };
-  stRow.append(stSel); panel.append(stRow);
+  stRow.append(stSel); host.append(stRow);
   numRow("Material share of the design space", tc.volumeFraction, "vf", () => !advanced, false);
   numRow("Filter radius (voxels)", tc.filterRadius, "rmin", () => !advanced);
   numRow("Max steps", tc.maxIterations, "iters", () => !advanced);
   head("Load");
-  const loadInfo = document.createElement("div"); loadInfo.style.cssText = "font-size:12px;margin-bottom:4px"; panel.append(loadInfo);
+  const loadInfo = document.createElement("div"); loadInfo.style.cssText = "font-size:12px;margin-bottom:4px"; host.append(loadInfo);
   numRow("Payload mass (kg)", tc.payloadMassKg, "mass", () => !advanced, false);
   numRow("Acceleration factor", tc.accelFactor, "accel", () => !advanced, false);
   const gRow = document.createElement("div"); gRow.className = "row"; gRow.innerHTML = "<label>Load direction in the model</label>";
   const gSel = document.createElement("select"); tc.gravityDirection.options.forEach((o) => gSel.add(new Option(o, o))); gSel.onchange = () => { S.gdir = gSel.value; sync(); };
-  gRow.append(gSel); panel.append(gRow);
+  gRow.append(gSel); host.append(gRow);
   numRow("Extra force X (N)", tc.extraForceN, "fx", () => !advanced, false);
   numRow("Extra force Y (N)", tc.extraForceN, "fy", () => !advanced, false);
   numRow("Extra force Z (N)", tc.extraForceN, "fz", () => !advanced, false);
@@ -220,44 +219,41 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   });
 
   const optA = group(fromOpt);
-  const info = document.createElement("div"); info.style.cssText = "font-size:12px;margin:10px 0;line-height:1.5"; panel.append(info);
+  const info = document.createElement("div"); info.style.cssText = "font-size:12px;margin:10px 0;line-height:1.5"; host.append(info);
   const setInfo = (cls, html) => { info.className = cls; info.innerHTML = html; };
 
-  const fromBr = panel.children.length;
-  head("Bridge");
-  const brNote = document.createElement("div"); brNote.className = "rec";
-  brNote.textContent = "Instant: a solid wrap from the flange top to the green faces, narrower in the middle, minus the red zones, the robot side, Flange Clearance and Bolt Clearance. It updates by itself after every change.";
-  panel.append(brNote);
-  numRow("Waist (% narrower in the middle)", tc.bridge.waistPercent, "waist");
+  const fromBr = host.children.length;
+  numRow("Waist (% narrower in the middle)", tc.bridge.waistPercent, "waist", undefined, undefined, "bridge");
   numRow("Bridge voxel size (mm)", tc.bridge.voxelSizeMm, "bh", () => !advanced);
-  const brOut = document.createElement("div"); brOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px"; panel.append(brOut);
-  const brG = group(fromBr), fromOpt2 = panel.children.length;
+  const brOut = document.createElement("div"); brOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px"; host.append(brOut);
+  const brG = group(fromBr), fromOpt2 = host.children.length;
   head("Generate");
   const genNote = document.createElement("div"); genNote.className = "rec";
   genNote.textContent = "One click: designs the connector, clears the red zones, the robot side, Flange Clearance and Bolt Clearance (orange ghost = the gap around red items), drops loose pieces, then refines on the finer voxel if ticked.";
   const rfL = document.createElement("label"), rfC = Object.assign(document.createElement("input"), { type: "checkbox" });
   rfC.onchange = () => { S.refineEnd = rfC.checked; sync(); }; rfL.append(rfC, " Refine at the end (finer, slower)"); rfL.title = tc.refineAtEnd.note;
-  panel.append(genNote, rfL);
+  host.append(genNote, rfL);
   numRow("Refined voxel size (mm)", tc.voxelSize, "h", () => !S.refineEnd && !advanced, false);
-  const typ = document.createElement("div"); typ.style.cssText = "font-size:12px;margin-bottom:6px"; panel.append(typ);
+  const typ = document.createElement("div"); typ.style.cssText = "font-size:12px;margin-bottom:6px"; host.append(typ);
   const bGo = btn("Generate design", () => generate()), bStop = btn("Stop", () => { chain = false; worker?.postMessage({ type: "stop" }); });
   bGo.disabled = true; bStop.disabled = true;
   const bar = Object.assign(document.createElement("progress"), { max: 1, value: 0 }); bar.style.cssText = "width:100%;margin-top:6px";
   const prog = document.createElement("div"); prog.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
   const clrOut = document.createElement("div"); clrOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
-  panel.append(bGo, bStop, bar, prog, clrOut);
+  const stick = document.createElement("div"); stick.style.cssText = "position:sticky;bottom:0;z-index:3;background:var(--bg);padding:6px 0;border-top:1px solid var(--line)";
+  stick.append(bGo, bStop, bar); host.append(stick, prog, clrOut);
   const rfBar = Object.assign(document.createElement("progress"), { max: 1, value: 0 }); rfBar.style.cssText = "width:100%;margin-top:6px";
   const rfHint = document.createElement("div"), refOut = document.createElement("div"); rfHint.className = "rec"; refOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
   const bRefine = btn("Refine again", () => refine()), bBack = btn("Back to coarse result", () => { if (worker) { refOut.textContent = "Going back…"; worker.postMessage({ type: "restore" }); } });
   const rfAdv = document.createElement("div"); rfAdv.append(bRefine, bBack, rfHint);
-  panel.append(rfAdv, rfBar, refOut);
+  host.append(rfAdv, rfBar, refOut);
   const canRefine = () => canClear && lastStats && lastStats.h > S.h * 1.001;
   refreshers.push(() => {
     rfC.checked = S.refineEnd; rfAdv.style.display = advanced ? "" : "none";
     bRefine.disabled = running || !canRefine(); bBack.disabled = running || !refined;
     rfHint.textContent = !lastStats || !canClear ? "Generate a design first." : canRefine() ? `Analysis voxel ${lastStats.h.toFixed(2)} mm → refined voxel ${S.h} mm.` : "The analysis voxel is already as fine as the voxel size. Lower the refined voxel size to refine.";
   });
-  const sumOut = document.createElement("div"); sumOut.style.cssText = "font-size:13px;line-height:1.6;margin-top:8px;font-weight:600"; panel.append(sumOut);
+  const sumOut = document.createElement("div"); sumOut.style.cssText = "font-size:13px;line-height:1.6;margin-top:8px;font-weight:600"; host.append(sumOut);
   let vol = null, over = null;
   function showSummary() { // weight and sag readout of the current result
     if (vol == null) { sumOut.textContent = ""; return; }
@@ -269,55 +265,29 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     ].filter(Boolean).join("<br>");
   }
 
-  head("Smoothing (optional)");
-  const smNote = document.createElement("div"); smNote.className = "rec";
-  smNote.textContent = "Each Smooth click rounds the voxel steps a little more and keeps the volume. Connect surfaces stay in place. Smoothing fills the red zones a little, so finish with Final cut. Generate resets smoothing.";
+  head("Smoothing (optional)").append(help("smoothing"));
   const smRow = document.createElement("div"); smRow.className = "row"; smRow.innerHTML = "<label>Smoothing strength</label>";
   const smSel = document.createElement("select"); tc.smooth.strength.options.forEach((o) => smSel.add(new Option(o.label, o.id)));
   smSel.value = tc.smooth.strength.default; smSel.onchange = () => { S.sp = tc.smooth.strength.options.find((o) => o.id === smSel.value).passes; sync(); };
-  smRow.append(smSel); panel.append(smNote, smRow);
+  smRow.append(smSel); host.append(smRow);
   numRow("Smoothing passes per click", tc.smooth.passes, "sp", () => !advanced, false);
   const smOut = document.createElement("div"); smOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
   const smSend = (msg, text) => { if (!worker || !canClear) return; smOut.textContent = text; worker.postMessage({ ...msg, id: ++gid }); };
   const bSmooth = btn("Smooth", () => smSend({ type: "smooth", passes: S.sp }, "Smoothing…"));
   const bUnsmooth = btn("Reset to voxels", () => smSend({ type: "smoothReset" }, "Resetting…"));
-  panel.append(bSmooth, bUnsmooth, smOut);
-  head("Final cut");
-  const cutNote = document.createElement("div"); cutNote.className = "rec";
-  cutNote.textContent = "Last step: cuts the clearance zones out of the final shape, like a boolean difference. Connect surfaces are never cut. Use it after smoothing, or after changing a gap.";
+  host.append(bSmooth, bUnsmooth, smOut);
+  head("Re-cut clearances").append(help("reCut"));
   const bCut = btn("Cut clearance", () => smSend({ type: "smoothClear" }, "Cutting…"));
-  panel.append(cutNote, bCut);
+  host.append(bCut);
   const optB = group(fromOpt2);
-  refreshers.push(() => { mSel.value = S.method; optA.style.display = optB.style.display = S.method === "optimize" ? "" : "none"; brG.style.display = S.method === "bridge" ? "" : "none"; });
-  head("Export");
-  const bStl = btn("Download STL", () => downloadStl());
-  const exNote = document.createElement("div"); exNote.className = "rec"; exNote.textContent = "Exports what you see (bridge, voxels or smoothed), in mm, in the robot flange position. Place the flange face on the bed.";
-  panel.append(bStl, exNote);
+  refreshers.push(() => { meth.set(S.method); optA.style.display = optB.style.display = S.method === "optimize" ? "" : "none"; brG.style.display = S.method === "bridge" ? "" : "none"; });
   refreshers.push(() => {
     bSmooth.disabled = bCut.disabled = bUnsmooth.disabled = running || !canClear;
-    bStl.disabled = running || !result || !(canClear || bridged);
     const o = tc.smooth.strength.options.find((x) => x.passes === S.sp); if (o) smSel.value = o.id;
   });
-  function downloadStl() { // binary STL of the shown result
-    if (!result) return;
-    const p = result.geometry.getAttribute("position").array, ix = result.geometry.index.array, n = ix.length / 3;
-    const buf = new ArrayBuffer(84 + 50 * n), dv = new DataView(buf), title = "Robotic end-effector connector";
-    for (let i = 0; i < title.length; i++) dv.setUint8(i, title.charCodeAt(i));
-    dv.setUint32(80, n, true);
-    for (let t = 0; t < n; t++) {
-      const a = 3 * ix[3 * t], b = 3 * ix[3 * t + 1], c = 3 * ix[3 * t + 2];
-      const ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2], wx = p[c] - p[a], wy = p[c + 1] - p[a + 1], wz = p[c + 2] - p[a + 2];
-      const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx, l = Math.hypot(nx, ny, nz) || 1;
-      let o = 84 + 50 * t;
-      for (const v of [nx / l, ny / l, nz / l, p[a], p[a + 1], p[a + 2], p[b], p[b + 1], p[b + 2], p[c], p[c + 1], p[c + 2]]) { dv.setFloat32(o, v, true); o += 4; }
-    }
-    const url = URL.createObjectURL(new Blob([buf], { type: "model/stl" })), el = Object.assign(document.createElement("a"), { href: url, download: "connector.stl" });
-    el.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-
   const selfBox = document.createElement("div"), selfOut = document.createElement("div"); selfOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
-  selfBox.append(btn("Run solver self-test", () => { selfOut.textContent = "Running…"; ensureWorker().postMessage({ type: "selftest" }); }), selfOut); panel.append(selfBox);
-  refreshers.push(() => { sel.value = S.conn; stSel.value = S.str; prC.checked = S.print; gSel.value = S.gdir; gRow.style.display = advanced ? "" : "none"; selfBox.style.display = advanced ? "" : "none"; });
+  selfBox.append(btn("Run solver self-test", () => { selfOut.textContent = "Running…"; ensureWorker().postMessage({ type: "selftest" }); }), selfOut); host.append(selfBox);
+  refreshers.push(() => { sel.value = S.conn; stSel.value = S.str; pr.set(S.print); gSel.value = S.gdir; gRow.style.display = advanced ? "" : "none"; selfBox.style.display = advanced ? "" : "none"; });
 
   function setLock(on) {
     running = on; panel.querySelectorAll("input,select,button").forEach((x) => (x.disabled = on));
