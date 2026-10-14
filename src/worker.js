@@ -2,7 +2,9 @@ import { zipSync, strToU8 } from "fflate";
 import { exportSTEP, importSTEP } from "replicad";
 import wasmUrl from "replicad-opencascadejs/wasm?url";
 import { initKernel, buildToolStart } from "./toolStart.js";
-// import { buildPrimitive } from "./primitives.js";
+import { replyTo } from "./rpc.js";
+import ts from "../data/toolStart.json";
+import te from "../data/toolEnd.json";
 
 const ready = initKernel({ locateFile: () => wasmUrl });
 let last = null;
@@ -67,45 +69,39 @@ async function exportScene(m) {
       }
     }
     const file = ext === "zip" ? `${m.base}_stl.zip` : `${m.base}.${ext}`;
-    postMessage({ exportedScene: true, xid: m.xid, ok: true, file, data, info: { objects: parts.length, tris, bytes: data.byteLength } }, [data]);
-  } catch (err) { postMessage({ exportedScene: true, xid: m.xid, ok: false, error: String(err?.message ?? err) }); }
+    replyTo(m, { ok: true, file, data, info: { objects: parts.length, tris, bytes: data.byteLength } }, [data]);
+  } catch (err) { replyTo(m, { ok: false, error: String(err?.message ?? err) }); }
   finally { own.forEach((s) => s.delete?.()); }
 }
 
+// view mesh of a B-rep, with plain typed arrays the main thread can take over
+const viewMesh = (s, q) => { const me = s.mesh({ tolerance: q.toleranceMm, angularTolerance: (q.angleDeg * Math.PI) / 180 });
+  return { me, mesh: { v: Float32Array.from(me.vertices), n: Float32Array.from(me.normals), t: Uint32Array.from(me.triangles) } }; };
+const meshBufsV = (x) => [x.v.buffer, x.n.buffer, x.t.buffer];
+
+const handlers = {
+  async import(m) { return addPart(m, await importSTEP(new Blob([m.data]))); },
+  async primitive(m) { const { buildPrimitive } = await import("./primitives.js"); return addPart(m, buildPrimitive(m.kind, m.size)); },
+  drop(m) { shapes.get(m.sid)?.delete?.(); shapes.delete(m.sid); },
+  exportScene,
+  build(m) {
+    const r = buildToolStart(m.flange, m.settings);
+    if (!r.ok) return replyTo(m, { ok: false, errors: r.errors, warnings: r.warnings });
+    last?.delete?.(); last = r.shape; // the old robot side is freed (OpenCascade memory is not garbage collected)
+    const { mesh } = viewMesh(last, ts.viewMesh), d = r.dims;
+    replyTo(m, { ok: true, warnings: r.warnings, mesh,
+      dims: { plateOuter: d.plateOuter, holeD: d.holeD, headD: d.headD, seatLength: d.seat.length, bore: d.bore, depth: d.depth, collarOuter: d.collarOuter,
+              thickness: d.plateThickness, spigotOuter: d.spigotOuter, centreHole: d.centreHole, screws: d.screws, pinHole: d.hasPin && d.pinLength === null, dowelD: d.dowelD } }, meshBufsV(mesh));
+  },
+};
+function addPart(m, s) { // a tool-end part: keep its B-rep under its id, send the view mesh and the face ranges
+  const { me, mesh } = viewMesh(s, te.viewMesh);
+  shapes.get(m.sid)?.delete?.(); shapes.set(m.sid, s);
+  replyTo(m, { ok: true, name: m.name, kind: m.kind, sid: m.sid, fg: me.faceGroups, mesh }, meshBufsV(mesh));
+}
+
 onmessage = async (e) => {
-  const m = e.data;
-  if (m.type === "import" || m.type === "primitive") {
-    try {
-      await ready;
-      const { buildPrimitive } = m.type === "primitive" ? await import("./primitives.js") : {};
-      const s = m.type === "import" ? await importSTEP(new Blob([m.data])) : buildPrimitive(m.kind, m.size);
-      const me = s.mesh({ tolerance: 0.05, angularTolerance: 0.2 });
-      shapes.get(m.sid)?.delete?.(); shapes.set(m.sid, s);
-      postMessage({ imported: true, ok: true, name: m.name, kind: m.kind, keep: m.keep, sid: m.sid, fg: me.faceGroups,
-        mesh: { v: Float32Array.from(me.vertices), n: Float32Array.from(me.normals), t: Uint32Array.from(me.triangles) } });
-    } catch (err) { postMessage({ imported: true, ok: false, error: String(err) }); }
-    return;
-  }
-  if (m.type === "drop") { shapes.get(m.sid)?.delete?.(); shapes.delete(m.sid); return; }
-  if (m.type === "exportScene") { await ready; return exportScene(m); }
-  try {
-    await ready;
-    if (m.type === "build") {
-      const r = buildToolStart(m.flange, m.settings);
-      if (!r.ok) return postMessage({ id: m.id, ok: false, errors: r.errors, warnings: r.warnings });
-      last = r.shape;
-      const me = last.mesh({ tolerance: 0.03, angularTolerance: 0.15 });
-      const d = r.dims;
-      postMessage({ id: m.id, ok: true, warnings: r.warnings,
-        dims: { plateOuter: d.plateOuter, holeD: d.holeD, headD: d.headD, seatLength: d.seat.length, bore: d.bore, depth: d.depth, collarOuter: d.collarOuter,
-                thickness: d.plateThickness, spigotOuter: d.spigotOuter, centreHole: d.centreHole, screws: d.screws, pinHole: d.hasPin && d.pinLength === null, dowelD: d.dowelD },
-        mesh: { v: Float32Array.from(me.vertices), n: Float32Array.from(me.normals), t: Uint32Array.from(me.triangles) } });
-    } else if (m.type === "export" && last) {
-      let data;
-      if (m.format === "step") data = await exportSTEP([{ shape: last, name: "tool_start" }], { unit: "MM", modelUnit: "MM" }).arrayBuffer();
-      else if (m.format === "stl") data = await last.blobSTL({ tolerance: 0.01, angularTolerance: 0.1 }).arrayBuffer();
-      else { const me = last.mesh({ tolerance: 0.01, angularTolerance: 0.1 }); data = ab(threeMF([{ name: "tool_start", v: me.vertices, t: me.triangles }])); }
-      postMessage({ id: m.id, exported: true, format: m.format, data }, [data]);
-    }
-  } catch (err) { postMessage({ id: m.id, ok: false, errors: [String(err)], warnings: [] }); }
+  const m = e.data, h = handlers[m.type]; if (!h) return;
+  try { await ready; await h(m); }
+  catch (err) { replyTo(m, { ok: false, error: String(err?.message ?? err), errors: [String(err?.message ?? err)], warnings: [] }); }
 };

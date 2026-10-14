@@ -6,11 +6,12 @@ import { createFem } from "./fem.js";
 // Refine only: x0 = start density per element (instead of vf). shrink = {tol, step, minFrac}: once the design settles, the material cap is lowered
 // by "step" while the stiffness stays within "tol" of the start design (compliance of the first step), down to minFrac of the first cap.
 // Print-ready only: am = {base (1 = cell rests on the bed), P, eps, start}: the additive manufacturing filter below is applied after the density filter.
+// solver: data/toolConnect.json "solver" block (penalty, minStiffness, moveLimit, stopChange, minSteps, shrinkSettleSteps, firstStep, laterSteps).
 // onStep(info) may be async (lets the worker receive Stop). shouldStop() -> true to stop.
 export async function optimize(P, onStep, shouldStop) {
-  const { nx, ny, nz, active, passive, fixedMask, force, vf, rmin, maxIter, x0, shrink, am } = P;
-  const p = 3, Emin = 1e-3, move = 0.3, nel = nx * ny * nz;
-  const fem = createFem({ nx, ny, nz, active, Emin, p });
+  const { nx, ny, nz, active, passive, fixedMask, force, vf, rmin, maxIter, x0, shrink, am, solver: sv } = P;
+  const p = sv.penalty, Emin = sv.minStiffness, move = sv.moveLimit, nel = nx * ny * nz;
+  const fem = createFem({ nx, ny, nz, active, Emin, p, mg: sv.multigrid });
   fem.setFixed(fixedMask);
 
   const rowOf = new Int32Array(nel).fill(-1), list = [];
@@ -56,7 +57,7 @@ export async function optimize(P, onStep, shouldStop) {
   for (let it = 1; it <= maxIter; it++) {
     if (shouldStop()) { stopped = true; break; }
     fem.setDensity(phys);
-    const s = fem.solve(force, u, it === 1 ? 1e-4 : 1e-3, it === 1 ? 500 : 60);
+    const cg = it === 1 ? sv.firstStep : sv.laterSteps, s = fem.solve(force, u, cg.tolerance, cg.maxCgIterations);
     fem.unitEnergy(u, ue);
     c = 0; for (let d = 0; d < fem.ndof; d++) c += force[d] * u[d];
     if (c0 === null) c0 = cRef = c;
@@ -78,7 +79,7 @@ export async function optimize(P, onStep, shouldStop) {
     filter(); steps = it;
     await onStep({ it, maxIter, c, c0, vol, change, cg: s.iters, rho: phys });
     since++;
-    if (change < 0.02 && it >= 12 && (!shrink || since >= 8)) {
+    if (change < sv.stopChange && it >= sv.minSteps && (!shrink || since >= sv.shrinkSettleSteps)) {
       if (shrink && c <= cRef * (1 + shrink.tol) && Vt * (1 - shrink.step) >= Vcap * shrink.minFrac) {
         accepted = Float64Array.from(x); accC = c; accVol = vol; Vt *= 1 - shrink.step; since = 0; continue;
       }
@@ -146,14 +147,14 @@ export function amSelfTest(P, eps) {
 
 // Refine self-test: a small cantilever is optimized, then re-run from its own result with the shrink rule.
 // Checks: the material never goes above the cap, and the stiffness stays within the tolerance of the start design.
-export async function refineSelfTest(tol, step, minFrac) {
+export async function refineSelfTest(tol, step, minFrac, solver) {
   const nx = 16, ny = 5, nz = 5, nel = nx * ny * nz, sx = nx + 1, sy = ny + 1, nn = sx * sy * (nz + 1);
   const fixedMask = new Uint8Array(3 * nn), force = new Float64Array(3 * nn);
   for (let j = 0; j <= ny; j++) for (let k = 0; k <= nz; k++) {
     for (let d = 0; d < 3; d++) fixedMask[3 * (0 + sx * (j + sy * k)) + d] = 1;
     force[3 * (nx + sx * (j + sy * k)) + 2] = -1 / ((ny + 1) * (nz + 1));
   }
-  const base = { nx, ny, nz, active: new Uint8Array(nel).fill(1), passive: new Uint8Array(nel), fixedMask, force, vf: 0.4, rmin: 1.5, maxIter: 80 };
+  const base = { nx, ny, nz, active: new Uint8Array(nel).fill(1), passive: new Uint8Array(nel), fixedMask, force, vf: 0.4, rmin: 1.5, maxIter: 80, solver };
   const noop = () => {}, never = () => false;
   const a = await optimize(base, noop, never);
   const x0 = new Float64Array(nel); for (let e = 0; e < nel; e++) x0[e] = a.rho[e] > 0.5 ? 1 : 0.01;

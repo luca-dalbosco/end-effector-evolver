@@ -1,5 +1,6 @@
 // Finite elements for the voxel design space: 8-node cube elements, matrix-free.
 // Non-dimensional units: voxel edge = 1, Young's modulus = 1. Physical scaling comes later.
+import { createMultigrid } from "./multigrid.js";
 
 // 24x24 stiffness matrix of one cube element (2x2x2 Gauss integration).
 export function hexKe(nu = 0.3) {
@@ -25,7 +26,8 @@ export function hexKe(nu = 0.3) {
 
 // Grid of nx*ny*nz elements. Element e = i + nx*(j + ny*k). Node (i,j,k) = i + (nx+1)*(j + (ny+1)*k). DOF = 3*node + (0,1,2).
 // active: optional Uint8Array(nel), 1 = element exists. density rho (0..1) -> stiffness Emin + (1-Emin)*rho^p.
-export function createFem({ nx, ny, nz, active = null, Emin = 1e-6, p = 3, nu = 0.3 }) {
+// mg: multigrid settings (data/toolConnect.json "solver.multigrid"); null or enabled false = Jacobi preconditioner only.
+export function createFem({ nx, ny, nz, active = null, Emin = 1e-6, p = 3, nu = 0.3, mg = null }) {
   const Ke = hexKe(nu), sx = nx + 1, sy = ny + 1, sz = sx * sy, nn = sz * (nz + 1), ndof = 3 * nn, nel = nx * ny * nz;
   const off = [0, 1, 1 + sx, sx, sz, sz + 1, sz + 1 + sx, sz + sx];
   const list = []; for (let e = 0; e < nel; e++) if (!active || active[e]) list.push(e);
@@ -37,7 +39,7 @@ export function createFem({ nx, ny, nz, active = null, Emin = 1e-6, p = 3, nu = 
   }
   const autoFixed = new Uint8Array(ndof); // nodes no element touches cannot move
   for (let n = 0; n < nn; n++) if (!touched[n]) autoFixed[3 * n] = autoFixed[3 * n + 1] = autoFixed[3 * n + 2] = 1;
-  let fixed = autoFixed.slice(), fixedList = new Int32Array(0);
+  let fixed = autoFixed.slice(), fixedList = new Int32Array(0), hasDensity = false;
   const Ee = new Float64Array(nel), diag = new Float64Array(ndof), invDiag = new Float64Array(ndof);
   const res = new Float64Array(ndof), zz = new Float64Array(ndof), pp = new Float64Array(ndof), qq = new Float64Array(ndof), xe = new Float64Array(24);
 
@@ -46,6 +48,7 @@ export function createFem({ nx, ny, nz, active = null, Emin = 1e-6, p = 3, nu = 
     fixed = autoFixed.slice(); if (mask) for (let d = 0; d < ndof; d++) if (mask[d]) fixed[d] = 1;
     const l = []; for (let d = 0; d < ndof; d++) if (fixed[d]) l.push(d);
     fixedList = Int32Array.from(l); updateInv();
+    if (mgc && hasDensity) mgc.update(Ee); // coarse levels hold the same nodes
   }
   function setDensity(rho) {
     diag.fill(0);
@@ -54,7 +57,8 @@ export function createFem({ nx, ny, nz, active = null, Emin = 1e-6, p = 3, nu = 
       Ee[e] = E;
       for (let a = 0; a < 8; a++) { const d0 = 3 * (n0 + off[a]); for (let d = 0; d < 3; d++) diag[d0 + d] += E * Ke[(3 * a + d) * 25]; }
     }
-    updateInv();
+    updateInv(); hasDensity = true;
+    if (mgc) mgc.update(Ee);
   }
   function matvec(x, y) { // y = K x
     y.fill(0);
@@ -69,15 +73,16 @@ export function createFem({ nx, ny, nz, active = null, Emin = 1e-6, p = 3, nu = 
     }
     for (let k = 0; k < fixedList.length; k++) y[fixedList[k]] = 0;
   }
-  // Solve K u = f with Jacobi-preconditioned conjugate gradients. u is the starting guess and the result.
+  // multigrid preconditioner, built once (the grid and the active cubes do not change), refreshed by setDensity
+  const mgc = mg?.enabled ? createMultigrid({ nx, ny, nz, elems, Ke, o: mg, fine: { mv: (x, y) => matvec(x, y), get invDiag() { return invDiag; }, get fixed() { return fixed; } } }) : null;
+  const precond = () => { if (mgc) mgc.apply(res, zz); else for (let d = 0; d < ndof; d++) zz[d] = invDiag[d] * res[d]; };
+  // Solve K u = f with preconditioned conjugate gradients (multigrid V-cycle, or Jacobi). u is the starting guess and the result.
   function solve(f, u, tol = 1e-6, maxIt = 1000) {
     for (let k = 0; k < fixedList.length; k++) u[fixedList[k]] = 0;
     matvec(u, qq);
     let rz = 0, fn = 0;
-    for (let d = 0; d < ndof; d++) {
-      const fd = fixed[d] ? 0 : f[d]; res[d] = fixed[d] ? 0 : fd - qq[d]; fn += fd * fd;
-      zz[d] = invDiag[d] * res[d]; pp[d] = zz[d]; rz += res[d] * zz[d];
-    }
+    for (let d = 0; d < ndof; d++) { const fd = fixed[d] ? 0 : f[d]; res[d] = fixed[d] ? 0 : fd - qq[d]; fn += fd * fd; }
+    precond(); for (let d = 0; d < ndof; d++) { pp[d] = zz[d]; rz += res[d] * zz[d]; }
     fn = Math.sqrt(fn) || 1;
     let it = 0, rel = 0;
     for (; it < maxIt; it++) {
@@ -86,7 +91,8 @@ export function createFem({ nx, ny, nz, active = null, Emin = 1e-6, p = 3, nu = 
       matvec(pp, qq);
       let pq = 0; for (let d = 0; d < ndof; d++) pq += pp[d] * qq[d];
       const alpha = rz / pq; let rzn = 0;
-      for (let d = 0; d < ndof; d++) { u[d] += alpha * pp[d]; res[d] -= alpha * qq[d]; zz[d] = invDiag[d] * res[d]; rzn += res[d] * zz[d]; }
+      for (let d = 0; d < ndof; d++) { u[d] += alpha * pp[d]; res[d] -= alpha * qq[d]; }
+      precond(); for (let d = 0; d < ndof; d++) rzn += res[d] * zz[d];
       const beta = rzn / rz; rz = rzn;
       for (let d = 0; d < ndof; d++) pp[d] = zz[d] + beta * pp[d];
     }

@@ -1,9 +1,10 @@
 // Stage D: Export. Pick what goes in the file, the format and the mesh resolution. The geometry engine (worker.js) writes the file.
 import ex from "../data/export.json";
+import { download } from "./ui.js";
 
-export function initExport({ worker, $, list, toolEnd, toolConnect, getStart, getFlangeId }) {
+export function initExport({ geo, $, list, toolEnd, toolConnect, getStart, getFlangeId }) {
   const S = { scope: ex.scope.default, withStart: ex.withToolStart.default, withEnd: ex.withToolEnd.default, format: ex.format.default, res: ex.resolution.default, tol: ex.toleranceMm.default, ang: ex.angleDeg.default };
-  let advanced = false, busy = false, xid = 0;
+  let advanced = false, busy = false;
   const el = (tag, text = "", css = "") => { const e = document.createElement(tag); e.textContent = text; e.style.cssText = css; return e; };
   const head = (t) => el("div", t, "font-weight:700;margin:14px 0 4px");
   const note = (t) => { const d = el("div", t); d.className = "rec"; return d; };
@@ -81,24 +82,27 @@ export function initExport({ worker, $, list, toolEnd, toolConnect, getStart, ge
     const c = collect(), hasConn = !!c.items?.some((i) => i.src === "mesh");
     if (hasConn && S.format === "step") S.format = ex.format.default; // the connector is a mesh: no STEP
     stepOpt.disabled = hasConn; fmt.value = S.format;
-    sum.innerHTML = c.error ? `<span class="warn">⚠ ${c.error}</span>` : `<b>In the file (${c.items.length}):</b> ${c.items.map((i) => i.name).join(", ")}` + c.notes.map((n) => `<br><span class="warn">⚠ ${n}</span>`).join("");
+    sum.innerHTML = ""; // built from elements: object names come from file names and renames, so they are never parsed as HTML
+    if (c.error) sum.append(Object.assign(el("span", "⚠ " + c.error), { className: "warn" }));
+    else {
+      sum.append(el("b", `In the file (${c.items.length}):`), " " + c.items.map((i) => i.name).join(", "));
+      c.notes.forEach((n) => sum.append(el("br"), Object.assign(el("span", "⚠ " + n), { className: "warn" })));
+    }
     bGo.disabled = busy || !!c.error || !c.items.length;
   }
 
   function go() {
     const c = collect(); if (c.error || !c.items.length || busy) return;
     busy = true; refresh(); say("", "Writing the file…"); $("status").textContent = "Exporting…";
-    worker.postMessage({ type: "exportScene", xid: ++xid, format: S.format, tol: S.tol, ang: (S.ang * Math.PI) / 180, items: c.items, base: baseName(c.items) });
+    geo("exportScene", { format: S.format, tol: S.tol, ang: (S.ang * Math.PI) / 180, items: c.items, base: baseName(c.items) }, done);
   }
-  worker.addEventListener("message", (e) => {
-    const m = e.data; if (!m.exportedScene || m.xid !== xid) return;
+  function done(m) {
     busy = false; $("status").textContent = "Ready"; refresh();
     if (!m.ok) return say("bad", "✖ " + m.error);
-    const url = URL.createObjectURL(new Blob([m.data])), a = Object.assign(document.createElement("a"), { href: url, download: m.file });
-    a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    download(m.file, m.data);
     out.innerHTML = "";
     const d = el("div", `✔ ${m.file}: ${m.info.objects} object(s), ${m.info.tris ? m.info.tris.toLocaleString() + " triangles" : "exact CAD faces"}, ${(m.info.bytes / 1048576).toFixed(m.info.bytes > 1048576 ? 1 : 2)} MB`); d.className = "ok"; out.append(d);
-  });
+  }
 
   document.addEventListener("stage", (e) => { const on = e.detail === "D"; panel.style.display = on ? "" : "none"; if (on) { out.innerHTML = ""; refresh(); } });
   refresh();
