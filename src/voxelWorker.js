@@ -139,7 +139,7 @@ function slotDist(b, x, y) {
   return Math.hypot(x - b.x - ux * t, y - b.y - uy * t);
 }
 
-// The tool start is never touched (plate cylinder), and nothing grows below it (Robot Avoidance cylinder).
+// The tool start is never touched (plate cylinder), and nothing grows below it (Flange Clearance cylinder).
 // Print-ready (k.bed): nothing grows below the bed at all.
 function keepOutMask(k, nx, ny, nz, org, h) {
   const out = new Uint8Array(nx * ny * nz), r2 = k.R * k.R, rr2 = k.robotR * k.robotR, kb = k.bed ? bedLayer(k, org, h) : -1;
@@ -158,7 +158,7 @@ function keepOutMask(k, nx, ny, nz, org, h) {
   return out;
 }
 
-// Clearance zones: every red item with its own gap (mm grow / mm out), plus the tool start, Robot Avoidance and Bolt Clearance.
+// Clearance zones: every red item with its own gap (mm grow / mm out), plus the tool start, Flange Clearance and Bolt Clearance.
 // "ring" = the cells the gaps add around the items (the ghost shell).
 function clearZones() {
   const S = state, { nx, ny, nz, h, org } = S, N = nx * ny * nz, blocked = new Uint8Array(N), ring = new Uint8Array(N);
@@ -425,7 +425,7 @@ function bridge(m) {
     if (over(W) > base) { let a = 0, b = W; for (let i = 0; i < cfg.printWaistSteps; i++) { const mid = (a + b) / 2; if (over(mid) > base) b = mid; else a = mid; } W = a; }
   }
   const g = grid(m.h, m.maxCells), { h, org, nx, ny, nz, N } = g, sd = fill(g, W, 2 * h);
-  // keep-outs, all analytic: tool start plate, Robot Avoidance, Bolt Clearance slots, bed
+  // keep-outs, all analytic: tool start plate, Flange Clearance, Bolt Clearance slots, bed
   for (let z = 0, c = 0; z < nz; z++) { const cz = org[2] + (z + 0.5) * h;
     for (let y = 0; y < ny; y++) { const cy = org[1] + (y + 0.5) * h;
       for (let x = 0; x < nx; x++, c++) {
@@ -516,7 +516,7 @@ function compute(m) {
         free[c] = 1; vis[c] = 1; count++; nFree++;
       }
     }
-    if (!connected(vis, srcA, srcB, nx, ny, nz)) throw new Error("The robot side, the tool or a red zone (including Robot Avoidance) blocks the way between the surfaces. Make the red zones smaller (for example a lower robot offset) or increase the design space size." + (m.keepOut?.bed ? " Print-ready is on: nothing may grow below the flange face." : ""));
+    if (!connected(vis, srcA, srcB, nx, ny, nz)) throw new Error("The robot side, the tool or a red zone (including Flange Clearance) blocks the way between the surfaces. Make the red zones smaller (for example a lower robot offset) or increase the design space size." + (m.keepOut?.bed ? " Print-ready is on: nothing may grow below the flange face." : ""));
     if (count > m.budget * 1.1 && !retried) { retried = true; h *= Math.cbrt(count / m.budget) * 1.02; continue; }
     const fixed = new Uint8Array(N); for (let c = 0; c < N; c++) if (kS[c] || (ko && ko[c])) fixed[c] = 1;
     state = { nx, ny, nz, h, org, srcA, srcB, free, cog, fixed, avoid: m.avoid || [], input: m, mat: rf ? rf.mat : null };

@@ -1,3 +1,5 @@
 {
-  "advanced": "Advanced mode lets you type any value, also outside the normal range, and shows extra settings. Each stage remembers its own on/off."
+  "advanced": "Advanced mode lets you type any value, also outside the normal range, and shows extra settings. Each stage remembers its own on/off.",
+  "clickTool": "Pick what a left-click does. Connect face (green): the connector attaches to this face; works on any tool object. Avoid face (red): nothing grows into the face, and the gap number pushes the zone outward. Avoid object (red): the whole object is kept clear, grown by the gap number. Right-click clears a green or red item. Shift-click is a shortcut for the avoid mode.",
+  "boltClearance": "Keeps room above the screw heads so a screwdriver can reach them. Diameter is the screw head plus margin; Height is the head height plus margin. Slot runs the clearance outward from the flange centre so inner screws stay reachable; Cylinder keeps clear only straight above each head. The numbers show the real size in mm."
 }

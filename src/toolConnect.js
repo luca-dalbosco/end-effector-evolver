@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import tc from "../data/toolConnect.json";
 import { solidCentroid } from "./voxelize.js";
+import { help, segmented } from "./ui.js";
 
 export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, list }) {
   const dom = renderer.domElement;
@@ -10,14 +11,14 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const S = { conn: tc.toolStartConnection.default, h: tc.voxelSize.default, band: tc.designSpace.default, str: tc.strength.default, vf: vfOf(tc.strength.default), print: tc.printReady.default, refineEnd: tc.refineAtEnd.default, bd: tc.bolt.diameterAdjustMm.default, bl: tc.bolt.lengthAdjustMm.default, bshape: tc.bolt.shape.default, bslot: tc.bolt.slotLengthMm.default, method: tc.method.default, waist: tc.bridge.waistPercent.default, ...ADV };
   let advanced = false, active = false, running = false, worker = null, reqId = 0, optId = 0, timer = null, secPerElem = null, lastStats = null, tStart = 0;
   let bridged = false, chain = false, sag = null, arrow = null, cog = null; // chain: Generate runs optimize → clearance → refine in one go
-  let curPart = null, hl = null, prev = [], result = null, ghost = null, gid = 0, canClear = false, refined = false, coarseGhost = null, predGen = null, predRef = null;
+  let clickMode = "connect", prev = [], result = null, ghost = null, gid = 0, canClear = false, refined = false, coarseGhost = null, predGen = null, predRef = null;
   // time estimate = measured matrix speed × work × a factor; the factor is learned from the last finished run on this computer
   const calib = { gen: 1, ref: 1 };
   try { Object.assign(calib, JSON.parse(localStorage.getItem("connCalib") || "{}")); } catch (e) { /* no storage */ }
   const learn = (key, actualMs, predMs) => { if (!(predMs > 0)) return; calib[key] = Math.min(20, Math.max(0.2, actualMs / predMs)); try { localStorage.setItem("connCalib", JSON.stringify(calib)); } catch (e) { /* ignore */ } };
   const refWork = (count, its) => count * (tc.estimate.cgIterationsPerStep * its + tc.refine.firstStepCgIterations) * tc.refine.overheadFactor; // × secPerElem × 1000 = ms before learning
-  const picked = new Set();
-  const robot = { mm: tc.avoid.robotOffsetMm.default }; // "Robot Avoidance": offset of the always-red cylinder below the tool start
+  const picked = []; // green faces on any tool object: { key, it (list row), obj (its 3D group), fi (face), ov (green overlay) }
+  const robot = { mm: tc.avoid.robotOffsetMm.default }; // "Flange Clearance": offset of the always-red cylinder below the tool start
   const avoid = []; // red items: { key, kind: "obj" | "face", it (list row), obj (its 3D group), fi (face), mm, ov (red overlay) }
   const panel = document.createElement("div"); panel.style.display = "none"; $("exportA").after(panel);
   const refreshers = [], sync = () => refreshers.forEach((f) => f());
@@ -47,23 +48,22 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   sel.onchange = () => { S.conn = sel.value; schedule(); };
   panel.append(sel);
 
-  head("Click in the 3D view");
-  const clickHint = document.createElement("div"); clickHint.className = "rec";
-  clickHint.textContent = "Click: connect to a face of the tool (green). Shift-click: avoid (red). Right-click: clear a green or red face or object.";
-  const avSel = document.createElement("select"); [["face", "Shift-click avoids a face (extruded outward)"], ["object", "Shift-click avoids a whole object (grown)"]].forEach(([id, l]) => avSel.add(new Option(l, id)));
-  panel.append(clickHint, avSel);
+  head("Click tool").append(help("clickTool"));
+  const tool = segmented([{ id: "connect", label: "Connect face" }, { id: "face", label: "Avoid face" }, { id: "object", label: "Avoid object" }], (id) => { clickMode = id; });
+  tool.set(clickMode); panel.append(tool.el);
 
-  head("Tool faces");
-  const count = document.createElement("div"), hint = document.createElement("div"); hint.className = "rec";
-  panel.append(count, btn("Clear faces", () => { picked.clear(); updateHighlight(); sync(); schedule(); }));
-
-  head("Avoid (red)");
-  const avoidBox = document.createElement("div"); avoidBox.style.cssText = "font-size:12px";
-  panel.append(avoidBox, btn("Clear avoided", () => { avoid.splice(0).forEach(dropEntry); renderAvoid(); schedule(); }));
-  head("Bolt Clearance");
+  head("Connection faces");
+  const connBox = document.createElement("div"); connBox.style.cssText = "font-size:12px";
+  panel.append(connBox, btn("Clear connection faces", () => { picked.splice(0).forEach(dropEntry); renderAvoid(); sync(); schedule(); }));
+  head("Avoid objects");
+  const objBox = document.createElement("div"); objBox.style.cssText = "font-size:12px"; panel.append(objBox);
+  head("Avoid faces");
+  const faceBox = document.createElement("div"); faceBox.style.cssText = "font-size:12px";
+  panel.append(faceBox, btn("Clear avoided", () => { avoid.splice(0).forEach(dropEntry); renderAvoid(); schedule(); }));
+  head("Bolt Clearance").append(help("boltClearance"));
   const boltInfo = document.createElement("div"); boltInfo.style.cssText = "font-size:12px;margin-bottom:4px"; panel.append(boltInfo);
-  numRow("Diameter adjust (mm)", tc.bolt.diameterAdjustMm, "bd");
-  numRow("Length adjust (mm)", tc.bolt.lengthAdjustMm, "bl");
+  absRow("Diameter (mm)", tc.bolt.diameterAdjustMm, "bd", () => getStart()?.dims.headD ?? null);
+  absRow("Height (mm)", tc.bolt.lengthAdjustMm, "bl", () => { const sc = getStart()?.dims.screws; return sc?.headH != null ? sc.headH + tc.bolt.lengthMarginMm : null; });
   const bsRow = document.createElement("div"); bsRow.className = "row"; bsRow.innerHTML = "<label>Shape</label>";
   const bsSel = document.createElement("select"); tc.bolt.shape.options.forEach((o) => bsSel.add(new Option(o.label, o.id)));
   bsSel.onchange = () => { S.bshape = bsSel.value; sync(); drawRobot(); schedule(); };
@@ -71,38 +71,44 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   refreshers.push(() => (bsSel.value = S.bshape));
   numRow("Slot length (mm)", tc.bolt.slotLengthMm, "bslot", () => S.bshape !== "slot");
   panel.append(btn("Reset bolt clearance", () => { S.bd = tc.bolt.diameterAdjustMm.default; S.bl = tc.bolt.lengthAdjustMm.default; S.bshape = tc.bolt.shape.default; S.bslot = tc.bolt.slotLengthMm.default; sync(); drawRobot(); schedule(); }));
-  refreshers.push(() => { const b = keepOut()?.bolts, sc = b?.filter((x) => !x.pin), pin = b?.find((x) => x.pin); boltInfo.textContent = b ? `Above each of the ${sc.length} screws: ${S.bshape === "slot" ? `a slot ${(2 * sc[0].r).toFixed(2)} mm wide, ${(sc[0].z1 - sc[0].z0).toFixed(2)} mm high, running ${S.bslot} mm outward from the flange centre (keeps inner screws reachable)` : `a cylinder Ø ${(2 * sc[0].r).toFixed(2)} mm, ${(sc[0].z1 - sc[0].z0).toFixed(2)} mm high`} (head Ø + 0.25, head height + 0.25).` + (pin ? ` Above the dowel: ${(2 * pin.r).toFixed(2)} mm wide.` : "") : "No screw data for this flange."; });
+  refreshers.push(() => { const b = keepOut()?.bolts, sc = b?.filter((x) => !x.pin), pin = b?.find((x) => x.pin); boltInfo.textContent = b ? `Above each of the ${sc.length} screws${S.bshape === "slot" ? `, as a slot running ${S.bslot} mm outward` : ""}.` + (pin ? ` Above the dowel: Ø ${(2 * pin.r).toFixed(2)} mm.` : "") : "No screw data for this flange."; });
   const cfgOf = (en) => (en.kind === "face" ? tc.avoid.faceExtrudeMm : tc.avoid.objectGrowMm);
   function renderAvoid() {
-    syncPart(); pruneAvoid(); avoidBox.innerHTML = "";
-    const addRow = (text, c, get, set, unit, onRemove) => {
+    prunePicked(); pruneAvoid(); connBox.innerHTML = objBox.innerHTML = faceBox.innerHTML = "";
+    const addRow = (box, text, c, get, set, unit, onRemove) => {
       const row = document.createElement("div"); row.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:3px 0";
-      const lab = document.createElement("span"); lab.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"; lab.textContent = text; lab.title = c.note;
-      const n = Object.assign(document.createElement("input"), { type: "number", step: c.step, value: get() }); n.style.width = "64px";
-      n.onchange = () => { let v = +n.value; if (n.value === "" || isNaN(v) || v < 0) { n.value = get(); return; } if (!advanced) v = clamp(v, c); set(v); n.value = v; schedule(); };
-      const u = document.createElement("span"); u.textContent = unit; row.append(lab, n, u);
-      if (onRemove) { const x = btn("✕", onRemove); x.title = "Stop avoiding this"; row.append(x); }
-      avoidBox.append(row);
+      const lab = document.createElement("span"); lab.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"; lab.textContent = text; row.append(lab);
+      if (c) {
+        lab.title = c.note;
+        const n = Object.assign(document.createElement("input"), { type: "number", step: c.step, value: get() }); n.style.width = "64px";
+        n.onchange = () => { let v = +n.value; if (n.value === "" || isNaN(v) || v < 0) { n.value = get(); return; } if (!advanced) v = clamp(v, c); set(v); n.value = v; schedule(); };
+        const u = document.createElement("span"); u.textContent = unit; row.append(n, u);
+      }
+      if (onRemove) { const x = btn("✕", onRemove); x.title = "Remove"; row.append(x); }
+      box.append(row);
     };
-    addRow("Robot Avoidance (below the robot side)", tc.avoid.robotOffsetMm, () => robot.mm, (v) => { robot.mm = v; drawRobot(); }, "mm offset");
+    if (!picked.length) { const e = document.createElement("div"); e.className = "rec"; e.textContent = "None yet. Pick \"Connect face\" above and click a face of a tool object."; connBox.append(e); }
+    picked.forEach((p) => addRow(connBox, `Face ${p.fi + 1} of ${p.it.name}`, null, null, null, null, () => { picked.splice(picked.indexOf(p), 1); dropEntry(p); renderAvoid(); sync(); schedule(); }));
+    addRow(objBox, "Flange Clearance (below the robot side)", tc.avoid.robotOffsetMm, () => robot.mm, (v) => { robot.mm = v; drawRobot(); }, "mm offset");
     avoid.forEach((en) => addRow(
-      en.kind === "face" ? `Face ${en.fi + 1} of ${en.it.name}` : en.it.name + (en.obj === curPart ? " (tool: ignored)" : ""),
+      en.kind === "face" ? faceBox : objBox,
+      en.kind === "face" ? `Face ${en.fi + 1} of ${en.it.name}` : en.it.name,
       cfgOf(en), () => en.mm, (v) => (en.mm = v), en.kind === "face" ? "mm gap out" : "mm gap",
       () => { avoid.splice(avoid.indexOf(en), 1); dropEntry(en); renderAvoid(); schedule(); }));
-    const loose = list.items().filter((i) => i.deletable !== false && i.object !== curPart && !avoid.some((en) => en.it === i));
+    const loose = list.items().filter((i) => i.deletable !== false && !picked.some((p) => p.it === i) && !avoid.some((en) => en.it === i));
     if (loose.length) {
       const w = document.createElement("div"); w.className = "warn"; w.style.marginTop = "6px";
-      w.textContent = `⚠ Not avoided and not connected: ${loose.map((i) => i.name).join(", ")}. The connector may grow through ${loose.length > 1 ? "them" : "it"}. Shift-click to avoid.`;
-      avoidBox.append(w);
+      w.textContent = `⚠ Not connected and not avoided: ${loose.map((i) => i.name).join(", ")}. The connector may grow through ${loose.length > 1 ? "them" : "it"}. Use "Avoid object" to keep it clear.`;
+      objBox.append(w);
     }
   }
 
-  // Robot Avoidance: red cylinder under the tool start (plate diameter + offset), and the always-blocked tool start cylinder
+  // Flange Clearance: red cylinder under the tool start (plate diameter + offset), and the always-blocked tool start cylinder
   const robotMat = new THREE.MeshBasicMaterial({ color: 0xe53935, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false });
   const robotGroup = new THREE.Group(); scene.add(robotGroup);
-  const robotRow = list.add({ name: "Robot Avoidance", object: robotGroup, deletable: false });
+  const robotRow = list.add({ name: "Flange Clearance", object: robotGroup, deletable: false });
   list.setVis(robotRow, 2); // hidden until step 3 (Generate)
-  const boltMat = new THREE.MeshBasicMaterial({ color: 0xff9800, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
+  const boltMat = new THREE.MeshBasicMaterial({ color: 0xe53935, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false });
   const boltGroup = new THREE.Group(); scene.add(boltGroup);
   const boltRow = list.add({ name: "Bolt Clearance", object: boltGroup, deletable: false });
   list.setVis(boltRow, 2);
@@ -136,6 +142,22 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   document.addEventListener("startbuilt", () => { drawRobot(); if (active) schedule(); });
   drawRobot();
 
+  // like numRow, but shows the real size (base + adjust); the json still stores the adjust range
+  function absRow(label, cfg, key, base) {
+    const d = document.createElement("div"); d.className = "row";
+    const l = Object.assign(document.createElement("label"), { textContent: label });
+    const r = Object.assign(document.createElement("input"), { type: "range", step: cfg.step });
+    const n = Object.assign(document.createElement("input"), { type: "number", step: cfg.step });
+    const rnd = (v) => Math.round(v * 100) / 100, rec = cfg.recommendedRange;
+    r.oninput = () => { const b = base(); if (b == null) return; S[key] = rnd(+r.value - b); sync(); drawRobot(); }; r.onchange = () => schedule();
+    n.onchange = () => { const b = base(); let v = +n.value; if (b == null || n.value === "" || isNaN(v)) return; v -= b; if (!advanced) v = clamp(v, cfg); S[key] = rnd(v); sync(); drawRobot(); schedule(); };
+    d.append(l, r, n); panel.append(d);
+    refreshers.push(() => {
+      const b = base(); d.classList.toggle("off", b == null); if (b == null) return;
+      r.min = rnd(b + cfg.min); r.max = rnd(b + cfg.max); r.value = n.value = rnd(b + S[key]);
+      n.className = rec ? (S[key] >= rec[0] && S[key] <= rec[1] ? "ok" : "warn") : "";
+    });
+  }
   function numRow(label, cfg, key, hidden = () => false, rerun = true) {
     const d = document.createElement("div"); d.className = "row";
     const l = Object.assign(document.createElement("label"), { textContent: label });
@@ -143,8 +165,8 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     const n = Object.assign(document.createElement("input"), { type: "number", step: cfg.step });
     const note = document.createElement("div"); note.className = "rec";
     const rec = cfg.recommendedRange; note.textContent = (rec ? `recommended ${rec[0]} to ${rec[1]}. ` : "") + (cfg.note ?? "");
-    r.oninput = () => { S[key] = +r.value; sync(); }; r.onchange = () => rerun && schedule();
-    n.onchange = () => { let v = +n.value; if (n.value === "" || isNaN(v)) return; if (!advanced) v = clamp(v, cfg); S[key] = v; sync(); if (rerun) schedule(); };
+    r.oninput = () => { S[key] = +r.value; sync(); if (key === "bslot") drawRobot(); }; r.onchange = () => rerun && schedule();
+    n.onchange = () => { let v = +n.value; if (n.value === "" || isNaN(v)) return; if (!advanced) v = clamp(v, cfg); S[key] = v; sync(); if (key === "bslot") drawRobot(); if (rerun) schedule(); };
     d.append(l, r, n, note); panel.append(d);
     refreshers.push(() => { r.value = n.value = S[key]; d.style.display = hidden() ? "none" : ""; n.className = rec ? (S[key] >= rec[0] && S[key] <= rec[1] ? "ok" : "warn") : ""; });
   }
@@ -204,7 +226,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const fromBr = panel.children.length;
   head("Bridge");
   const brNote = document.createElement("div"); brNote.className = "rec";
-  brNote.textContent = "Instant: a solid wrap from the flange top to the green faces, narrower in the middle, minus the red zones, the robot side, Robot Avoidance and Bolt Clearance. It updates by itself after every change.";
+  brNote.textContent = "Instant: a solid wrap from the flange top to the green faces, narrower in the middle, minus the red zones, the robot side, Flange Clearance and Bolt Clearance. It updates by itself after every change.";
   panel.append(brNote);
   numRow("Waist (% narrower in the middle)", tc.bridge.waistPercent, "waist");
   numRow("Bridge voxel size (mm)", tc.bridge.voxelSizeMm, "bh", () => !advanced);
@@ -212,7 +234,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   const brG = group(fromBr), fromOpt2 = panel.children.length;
   head("Generate");
   const genNote = document.createElement("div"); genNote.className = "rec";
-  genNote.textContent = "One click: designs the connector, clears the red zones, the robot side, Robot Avoidance and Bolt Clearance (orange ghost = the gap around red items), drops loose pieces, then refines on the finer voxel if ticked.";
+  genNote.textContent = "One click: designs the connector, clears the red zones, the robot side, Flange Clearance and Bolt Clearance (orange ghost = the gap around red items), drops loose pieces, then refines on the finer voxel if ticked.";
   const rfL = document.createElement("label"), rfC = Object.assign(document.createElement("input"), { type: "checkbox" });
   rfC.onchange = () => { S.refineEnd = rfC.checked; sync(); }; rfL.append(rfC, " Refine at the end (finer, slower)"); rfL.title = tc.refineAtEnd.note;
   panel.append(genNote, rfL);
@@ -295,7 +317,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
 
   const selfBox = document.createElement("div"), selfOut = document.createElement("div"); selfOut.style.cssText = "font-size:12px;line-height:1.5;margin-top:4px";
   selfBox.append(btn("Run solver self-test", () => { selfOut.textContent = "Running…"; ensureWorker().postMessage({ type: "selftest" }); }), selfOut); panel.append(selfBox);
-  refreshers.push(() => { count.textContent = `${picked.size} face(s) selected`; sel.value = S.conn; stSel.value = S.str; prC.checked = S.print; gSel.value = S.gdir; gRow.style.display = advanced ? "" : "none"; selfBox.style.display = advanced ? "" : "none"; });
+  refreshers.push(() => { sel.value = S.conn; stSel.value = S.str; prC.checked = S.print; gSel.value = S.gdir; gRow.style.display = advanced ? "" : "none"; selfBox.style.display = advanced ? "" : "none"; });
 
   function setLock(on) {
     running = on; panel.querySelectorAll("input,select,button").forEach((x) => (x.disabled = on));
@@ -319,34 +341,44 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   }
   dom.addEventListener("pointerup", (e) => {
     if (!active || running || (e.button !== 0 && e.button !== 2) || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
-    syncPart(); if (!curPart) return;
+    prunePicked(); pruneAvoid();
     const r = dom.getBoundingClientRect();
     ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, cam);
     const pickable = (i) => i.deletable !== false; // the flange is never pickable here
     if (e.button === 2) { // right-click: clear whatever is under the cursor (green face, red face, red object)
       const h = pickAt(shown().filter(pickable)); if (!h) return;
       const fi = faceAt(h.it.object, h.hit);
-      if (fi >= 0) { if (h.it.object === curPart && picked.delete(fi)) updateHighlight(); removeAvoid("face", h.it, fi); }
+      if (fi >= 0) { removePick(h.it, fi); removeAvoid("face", h.it, fi); }
       removeAvoid("obj", h.it, null);
       renderAvoid(); sync(); schedule(); return;
     }
-    if (e.shiftKey) { // shift-click: avoid
-      const object = avSel.value === "object";
-      const h = pickAt(shown().filter((i) => pickable(i) && (object ? i.object !== curPart : (i.object.userData.fg || []).length))); if (!h) return;
-      if (object) toggleAvoid("obj", h.it, null);
-      else { const fi = faceAt(h.it.object, h.hit); if (fi < 0) return; if (h.it.object === curPart && picked.delete(fi)) updateHighlight(); toggleAvoid("face", h.it, fi); }
-      renderAvoid(); sync(); schedule(); return;
+    const mode = e.shiftKey ? (clickMode === "object" ? "object" : "face") : clickMode; // shift-click = quick avoid
+    if (mode === "object") { const h = pickAt(shown().filter(pickable)); if (!h) return; toggleAvoid("obj", h.it, null); }
+    else {
+      const h = pickAt(shown().filter(pickable)); if (!h) return;
+      if (!(h.it.object.userData.fg || []).length) return setInfo("bad", "✖ This part has no face data. Re-add it in step 2.");
+      const fi = faceAt(h.it.object, h.hit); if (fi < 0) return;
+      if (mode === "connect") toggleConnect(h.it, fi); else toggleAvoid("face", h.it, fi);
     }
-    // plain click: connect (tool end only)
-    if (!faceInfo(curPart).fg.length) return setInfo("bad", "✖ This part has no face data. Re-add it in step 2.");
-    const row = list.items().find((i) => i.object === curPart), h = row && pickAt([row]); if (!h) return;
-    const fi = faceAt(curPart, h.hit); if (fi < 0) return;
-    if (picked.has(fi)) picked.delete(fi); else { picked.add(fi); removeAvoid("face", row, fi); }
-    updateHighlight(); renderAvoid(); sync(); schedule();
+    renderAvoid(); sync(); schedule();
   });
   // red items: a whole object (grows by mm) or one face (extruded outward by mm)
   const avMat = new THREE.MeshBasicMaterial({ color: 0xe53935, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   function dropEntry(en) { if (en.ov) { en.ov.parent?.remove(en.ov); en.ov.geometry.dispose(); en.ov = null; } }
+  function prunePicked() { // forget green faces of deleted rows, or whose mesh was replaced
+    for (let i = picked.length - 1; i >= 0; i--) { const p = picked[i]; if (!list.items().includes(p.it) || p.it.object !== p.obj) { dropEntry(p); picked.splice(i, 1); } }
+  }
+  function removePick(it, fi) { // fi null = every green face of this object
+    for (let i = picked.length - 1; i >= 0; i--) if (picked[i].it === it && (fi == null || picked[i].fi === fi)) { dropEntry(picked[i]); picked.splice(i, 1); }
+  }
+  function toggleConnect(it, fi) { // a face cannot be both green and red: the last click wins
+    const key = "c:" + it.id + ":" + fi, at = picked.findIndex((x) => x.key === key);
+    if (at >= 0) { dropEntry(picked[at]); picked.splice(at, 1); return; }
+    removeAvoid("face", it, fi); removeAvoid("obj", it, null);
+    const en = { key, it, obj: it.object, fi, ov: null }, g = new THREE.BufferGeometry();
+    g.setAttribute("position", baseMesh(en.obj).geometry.getAttribute("position")); g.setIndex(faceIndices(en.obj, [fi]));
+    en.ov = new THREE.Mesh(g, hlMat); en.obj.add(en.ov); picked.push(en);
+  }
   function pruneAvoid() { // forget rows that were deleted, or whose mesh was replaced (Apply to selected primitive)
     for (let i = avoid.length - 1; i >= 0; i--) { const en = avoid[i]; if (!list.items().includes(en.it) || en.it.object !== en.obj) { dropEntry(en); avoid.splice(i, 1); } }
   }
@@ -357,6 +389,7 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
   function toggleAvoid(kind, it, fi) { // a face cannot be both green and red: picking green removes red
     const key = kind + ":" + it.id + ":" + fi, at = avoid.findIndex((x) => x.key === key);
     if (at >= 0) { dropEntry(avoid[at]); avoid.splice(at, 1); return; }
+    if (kind === "obj") removePick(it, null); else removePick(it, fi);
     const en = { key, kind, it, obj: it.object, fi, mm: kind === "face" ? tc.avoid.faceExtrudeMm.default : tc.avoid.objectGrowMm.default, ov: null };
     const mesh = baseMesh(en.obj), g = new THREE.BufferGeometry();
     g.setAttribute("position", mesh.geometry.getAttribute("position"));
@@ -372,29 +405,26 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     fis.forEach((fi) => { const g = fg[fi], a = (g.start / k) * 3, b = a + (g.count / k) * 3; for (let i = a; i < b; i++) idx.push(src[i]); });
     return idx;
   }
-  function syncPart() { const p = toolEnd.getPart(); if (p === curPart) return; clearHl(); picked.clear(); curPart = p; sync(); }
-  function clearHl() { if (hl) { hl.parent?.remove(hl); hl.geometry.dispose(); hl = null; } }
-  function updateHighlight() {
-    clearHl(); if (!curPart || !picked.size) return;
-    const mesh = faceInfo(curPart).mesh, bg = new THREE.BufferGeometry();
-    bg.setAttribute("position", mesh.geometry.getAttribute("position")); bg.setIndex(faceIndices(curPart, [...picked]));
-    hl = new THREE.Mesh(bg, hlMat); curPart.add(hl);
-  }
   function trisOf(mesh, ranges) { // world-space triangles (9 numbers each); ranges = [[firstIndex, lastIndex+1], ...] or null for all
     const pos = mesh.geometry.getAttribute("position"), idx = mesh.geometry.index.array, v = new THREE.Vector3(), out = [];
     for (const [a, b] of ranges ?? [[0, idx.length]]) for (let i = a; i < b; i++) { v.fromBufferAttribute(pos, idx[i]).applyMatrix4(mesh.matrixWorld); out.push(v.x, v.y, v.z); }
     return Float32Array.from(out);
   }
-  function endTris(all) {
-    curPart.updateMatrixWorld(true);
-    const { mesh, fg, k } = faceInfo(curPart);
-    return trisOf(mesh, all ? null : [...picked].map((fi) => [(fg[fi].start / k) * 3, (fg[fi].start / k) * 3 + (fg[fi].count / k) * 3]));
+  function endTris(all) { // world-space triangles of every connected object (all) or of its green faces only
+    const out = [];
+    for (const it of new Set(picked.map((p) => p.it))) {
+      it.object.updateMatrixWorld(true);
+      const { mesh, fg, k } = faceInfo(it.object);
+      out.push(trisOf(mesh, all ? null : picked.filter((p) => p.it === it).map((p) => [(fg[p.fi].start / k) * 3, (fg[p.fi].start / k) * 3 + (fg[p.fi].count / k) * 3])));
+    }
+    const res = new Float32Array(out.reduce((s, a) => s + a.length, 0)); let o = 0;
+    out.forEach((a) => { res.set(a, o); o += a.length; });
+    return res;
   }
   function avoidData() { // world-space triangles of every red item
     pruneAvoid();
     const items = [], tr = [];
     for (const en of avoid) {
-      if (en.kind === "obj" && en.obj === curPart) continue;
       en.obj.updateMatrixWorld(true);
       const { mesh, fg, k } = faceInfo(en.obj), g = fg[en.fi];
       const t = trisOf(mesh, en.kind === "obj" ? null : [[(g.start / k) * 3, ((g.start + g.count) / k) * 3]]);
@@ -551,11 +581,11 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     return worker;
   }
   function run() {
-    syncPart(); const st = getStart();
+    renderAvoid(); const st = getStart();
     if (!st) return setInfo("warn", "Robot side is not ready yet.");
-    if (!curPart) { bGo.disabled = true; cog = null; drawArrow(); return setInfo("warn", "Add a part in step 2 (Tool) first."); }
+    if (!list.items().some((i) => i.deletable !== false)) { lastStats = null; bGo.disabled = true; cog = null; drawArrow(); clearPrev(); clearResult(); return setInfo("warn", "Add a part in step 2 (Tool) first."); }
+    if (!picked.length) { cog = null; drawArrow(); lastStats = null; bGo.disabled = true; clearPrev(); clearResult(); return setInfo("warn", "Pick \"Connect face\" and click one or more faces of the tool objects. They turn green."); }
     cog = solidCentroid(endTris(true)); drawArrow();
-    if (!picked.size) { lastStats = null; bGo.disabled = true; clearPrev(); clearResult(); return setInfo("warn", "Click one or more faces of the tool to choose where the connector attaches. They turn green."); }
     if (S.method === "bridge") return runBridge(st);
     ensureWorker(); bGo.disabled = true; drawRobot();
     const R = startR(st.dims);
@@ -592,6 +622,11 @@ export function initToolConnect({ scene, cam, renderer, $, toolEnd, getStart, li
     if (active) renderAvoid();
     if (active && !running) { sync(); run(); }
   });
+  const legend = document.createElement("div"); // colour key, only in stage 3
+  legend.style.cssText = "position:absolute;bottom:8px;right:8px;z-index:5;display:none;font-size:11px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:4px 8px;line-height:1.5";
+  legend.innerHTML = [["#2ecc71", "connect"], ["#e53935", "avoid, clearance"], ["#ff9800", "gap"], ["#ffd600", "load"]].map(([col, t]) => `<span style="color:${col}">■</span> ${t}`).join("<br>");
+  dom.parentElement.append(legend);
+  document.addEventListener("stage", (e) => { legend.style.display = e.detail === "C" ? "" : "none"; });
   renderAvoid(); sync();
   return { // used by stage D (Export)
     getResult: () => (result && !running && (canClear || bridged) && result.geometry.index ? { p: result.geometry.getAttribute("position").array, i: result.geometry.index.array } : null),
