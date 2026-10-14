@@ -30,6 +30,21 @@ const LIBS = [
     by: 'Mathias Bynens', what: 'text helper' },
 ];
 
+// Welcome pop-up (first visit, and the footer "Tutorial" link). Edit the texts here.
+const WELCOME = {
+  video: '', // <- put the intro video URL here (empty = shows "coming soon")
+  intro: `<p>Welcome! This tool builds a 3D-printable connector between your robot flange and your own part.</p>
+    <p>Everything runs in your browser. Nothing is uploaded.</p>`,
+  steps: [
+    'Pick your robot flange (tab 1 Robot side).',
+    'Upload your part as a STEP file, or add a simple shape (tab 2 Tool).',
+    'Click the faces to connect and choose Bridge or Voxel (tab 3 Connector).',
+    'Press Generate.',
+    'Export and print (tab 4 Export).',
+  ],
+};
+const WELCOME_KEY = 'welcomeHide'; // localStorage: '1' = do not open on start
+
 // Pop-up pages. Plain HTML inside the backticks.
 const PAGES = {
   about: {
@@ -37,15 +52,6 @@ const PAGES = {
     html: `<p>Robotic End-Effector Generator creates a 3D-printable connector
       between a robot flange and your own part.</p>
       <p>Everything runs in your browser. Nothing is uploaded.</p>`,
-  },
-  tutorial: {
-    title: 'Tutorial',
-    html: `<ol>
-      <li>Pick your robot and design the tool start (A).</li>
-      <li>Import your part and choose surfaces (B).</li>
-      <li>Generate the connector (C).</li>
-      <li>Export and print (D).</li>
-    </ol><p>Tutorial coming soon.</p>`,
   },
     licence: {
     title: 'Licence',
@@ -99,7 +105,7 @@ const PAGES = {
 // Links shown in the corner. "page" opens a pop-up, "href" opens a new tab.
 const ITEMS = [
   { label: 'About', page: 'about' },
-  { label: 'Tutorial', page: 'tutorial' },
+  { label: 'Tutorial', action: 'welcome' },
   { label: 'Donate ☕', href: LINKS.donate },
   { label: 'Licence', page: 'licence' },
   { label: 'Credits', page: 'credits' },
@@ -121,7 +127,10 @@ dialog.footer-dialog{max-height:80vh;overflow:auto;max-width:480px;width:90vw;bo
   font:14px/1.5 system-ui,sans-serif}
 dialog.footer-dialog::backdrop{background:#0008}
 dialog.footer-dialog h2{margin:0 0 10px;font-size:18px}
-dialog.footer-dialog button{margin-top:12px;cursor:pointer}
+dialog.footer-dialog button{margin-top:12px;margin-right:6px;cursor:pointer}
+dialog.footer-dialog .wel-foot{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12px}
+dialog.footer-dialog .wel-foot label{margin-right:auto}
+dialog.footer-dialog .wel-foot button{margin:0}
 `;
 
 export function initFooterLinks() {
@@ -135,16 +144,38 @@ export function initFooterLinks() {
   // click on the dark backdrop closes the pop-up
   dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
 
+  // Welcome pop-up: page 1 = welcome + video, page 2 = the 5 steps. "Don't show again" is ticked by default (first visit only).
+  const store = (v) => { try { v === undefined ? null : localStorage.setItem(WELCOME_KEY, v); return localStorage.getItem(WELCOME_KEY); } catch (e) { return null; } };
+  function openWelcome(page = 1) {
+    const last = page === 2;
+    const body = last
+      ? `<h2>The 5 steps</h2><ol>${WELCOME.steps.map((s) => `<li>${s}</li>`).join('')}</ol>`
+      : `<h2>Welcome</h2>${WELCOME.intro}<p>${WELCOME.video ? `<a href="${WELCOME.video}" target="_blank" rel="noopener">▶ Watch the intro video</a>` : '▶ Intro video: coming soon.'}</p>`;
+    dialog.innerHTML = `${body}<div class="wel-foot"><label><input type="checkbox" id="wel-hide"> Don't show again</label>${last ? '<button id="wel-back">Back</button>' : '<button id="wel-skip">Skip</button>'}<button id="wel-next">${last ? 'Done' : 'Next →'}</button></div>`;
+    const hide = dialog.querySelector('#wel-hide'); hide.checked = openWelcome.hide ?? true;
+    hide.onchange = () => { openWelcome.hide = hide.checked; };
+    const close = () => dialog.close();
+    dialog.querySelector('#wel-next').onclick = () => (last ? close() : openWelcome(2));
+    if (last) dialog.querySelector('#wel-back').onclick = () => openWelcome(1);
+    else dialog.querySelector('#wel-skip').onclick = close;
+    dialog.dataset.welcome = '1';
+    if (!dialog.open) dialog.showModal();
+  }
+  dialog.addEventListener('close', () => { if (dialog.dataset.welcome) store(openWelcome.hide === false ? '0' : '1'); dialog.dataset.welcome = ''; openWelcome.hide = undefined; }); // Esc and backdrop count too
+
   const nav = document.createElement('nav');
   nav.className = 'footer-links';
   for (const item of ITEMS) {
     const a = document.createElement('a');
     a.textContent = item.label;
-    if (item.href) {
+    if (item.action === 'welcome') {
+      a.addEventListener('click', () => openWelcome(1));
+    } else if (item.href) {
       a.href = item.href;
       if (item.href.startsWith('http')) { a.target = '_blank'; a.rel = 'noopener'; }
     } else {
       a.addEventListener('click', () => {
+        dialog.dataset.welcome = '';
         const p = PAGES[item.page];
         dialog.innerHTML = `<h2>${p.title}</h2>${p.html}<br><button>Close</button>`;
         dialog.querySelector('button').onclick = () => dialog.close();
@@ -154,4 +185,5 @@ export function initFooterLinks() {
     nav.appendChild(a);
   }
   document.body.appendChild(nav);
+  if (store() !== '1') openWelcome(1); // first visit
 }
