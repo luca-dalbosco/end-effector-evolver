@@ -10,6 +10,7 @@ import { initExport } from './exportStage.js';
 import exportCfg from "../data/export.json";
 import { initAdvanced, initSteps, section, help, line, download, numberRow, recNote } from './ui.js';
 import { rpc, serial } from './rpc.js';
+import { record } from './history.js';
 
 const geo = rpc(new Worker(new URL("./worker.js", import.meta.url), { type: "module" })); // geometry engine (OpenCascade)
 const $ = (id) => document.getElementById(id);
@@ -36,15 +37,20 @@ function row(label, el, used = () => true, hidden = () => false, helpId) {
 function select(label, getOpts, get, set, used, optOk = () => true, helpId) {
   const s = document.createElement("select");
   const fill = () => { const v = get(); s.innerHTML = ""; getOpts().forEach((o) => { const op = new Option(o.label ?? o, o.id ?? o); op.disabled = !optOk(o); s.add(op); }); s.value = v; };
-  s.onchange = () => { set(s.value); refreshAll(); schedule(); };
+  s.onchange = () => { const b = snap(), v = s.value, t = s.selectedOptions[0]?.text ?? v; set(v); refreshAll(); schedule(); if (v !== "__add") undoable(label, t, b); };
   row(label, s, used, undefined, helpId); refreshers.push(fill); return fill;
 }
-function check(label, get, set, hidden, helpId) { const l = document.createElement("label"), c = document.createElement("input"); c.type = "checkbox"; c.onchange = () => { set(c.checked); refreshAll(); schedule(); }; l.append(c, " " + label); if (helpId) l.append(help(helpId)); row("", l, () => true, hidden); refreshers.push(() => (c.checked = get())); }
+function check(label, get, set, hidden, helpId) { const l = document.createElement("label"), c = document.createElement("input"); c.type = "checkbox"; c.onchange = () => { const b = snap(); set(c.checked); refreshAll(); schedule(); undoable(plain(label), c.checked ? "on" : "off", b); }; l.append(c, " " + label); if (helpId) l.append(help(helpId)); row("", l, () => true, hidden); refreshers.push(() => (c.checked = get())); }
 function slider(label, cfg, get, set, used = () => true, hidden = () => false, helpId) {
   const nr = numberRow({ label, cfg, help: helpId, get, set, live: refreshAll, commit: schedule, clamp: () => !advanced, note: recNote(cfg), hidden, off: () => !used(), lockSlider: () => advanced });
   host.append(nr.el); refreshers.push(nr.refresh);
 }
 const refreshAll = () => refreshers.forEach((f) => f());
+// undo of the robot-side menus and ticks: the whole flange choice and settings are kept before and after the change
+const snap = () => ({ flange: cur.flange, settings: structuredClone(settings) });
+const restore = (sn) => { cur.flange = sn.flange; Object.assign(settings, structuredClone(sn.settings)); refreshAll(); schedule(); };
+function undoable(label, text, before) { const a = snap(); record(`${label}: ${text}`, () => restore(before), () => restore(a)); }
+const plain = (l) => l.replace(/\s*\(.*\)$/, "");
 
 // robot menus: brand, then model
 const ADD = { id: "__add", label: "+ Add custom flange…" };
@@ -162,5 +168,6 @@ initExport({ geo, $, list, toolEnd, toolConnect, getStart: () => startInfo, getF
 initSteps({
   A: () => (startOk ? null : $("status").textContent === "Building…" ? "Building the robot side…" : "The robot side cannot be built. See the message above."),
   B: () => (toolEnd.getPart() ? null : "No object yet. Import a STEP file or add a primitive."),
-  C: () => (toolConnect.getResult() ? null : "No connector yet. Click the tool faces it should attach to."),
+  C: () => (toolConnect.connectedCount() ? null : "No face connected yet. Pick Connect face and click a face of the tool."),
+  G: () => (toolConnect.getResult() ? null : "No connector yet. Connect a face in step 3 first."),
 });

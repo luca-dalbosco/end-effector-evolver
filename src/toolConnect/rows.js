@@ -2,7 +2,7 @@
 import { numberRow } from "../ui.js";
 
 export const btn = (label, fn) => Object.assign(document.createElement("button"), { textContent: label, onclick: fn });
-export const head = (host, t) => { const b = document.createElement("div"); b.textContent = t; b.style.cssText = "font-weight:700;margin:14px 0 4px"; host.append(b); return b; };
+export const head = (host, t) => { const b = document.createElement("div"); b.textContent = t; b.className = "blk-head"; host.append(b); return b; };
 export const textBox = (css) => { const d = document.createElement("div"); d.style.cssText = css; return d; };
 export const clamp = (v, c) => Math.min(c.max, Math.max(c.min, v));
 // wraps what was added to host since child number `from`, to show or hide it per method

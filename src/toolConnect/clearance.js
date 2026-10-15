@@ -2,7 +2,7 @@
 // the keep-out data sent to the worker, their 3D shapes and the Bolt Clearance panel rows.
 import * as THREE from "three";
 import tc from "../../data/toolConnect.json";
-import { help } from "../ui.js";
+import { help, numberRow, pick } from "../ui.js";
 import { head, btn, numRow, absRow } from "./rows.js";
 
 export function initClearance(C, host) {
@@ -52,10 +52,15 @@ export function initClearance(C, host) {
   absRow(C, host, "Height (mm)", tc.bolt.lengthAdjustMm, "bl", () => { const sc = getStart()?.dims.screws; return sc?.headH != null ? sc.headH + tc.bolt.lengthMarginMm : null; });
   const bsRow = document.createElement("div"); bsRow.className = "row"; bsRow.innerHTML = "<label>Shape</label>";
   const bsSel = document.createElement("select"); tc.bolt.shape.options.forEach((o) => bsSel.add(new Option(o.label, o.id)));
-  bsSel.onchange = () => { S.bshape = bsSel.value; C.sync(); C.drawRobot(); C.schedule(); };
+  bsSel.onchange = pick(bsSel, "Bolt clearance shape", () => S.bshape, (v) => { S.bshape = v; C.sync(); C.drawRobot(); C.schedule(); });
   bsRow.append(bsSel); host.append(bsRow);
   numRow(C, host, "Slot length (mm)", tc.bolt.slotLengthMm, "bslot", () => S.bshape !== "slot");
   host.append(btn("Reset bolt clearance", () => { S.bd = tc.bolt.diameterAdjustMm.default; S.bl = tc.bolt.lengthAdjustMm.default; S.bshape = tc.bolt.shape.default; S.bslot = tc.bolt.slotLengthMm.default; C.sync(); C.drawRobot(); C.schedule(); }));
+  // Robot Clearance: the cylinder below the robot side (it used to sit in the avoid list)
+  const rc = tc.avoid.robotOffsetMm, rrec = rc.recommendedRange;
+  const rr = numberRow({ label: "Robot Clearance (mm)", cfg: rc, help: "robotClearance", get: () => C.robot.mm, set: (v) => (C.robot.mm = v), live: () => { C.drawRobot(); C.sync(); }, commit: C.schedule,
+    clamp: () => !C.advanced, note: `recommended ${rrec[0]} to ${rrec[1]}. ${rc.note}`, rate: (v) => (v >= rrec[0] && v <= rrec[1] ? "ok" : "warn") });
+  rr.el.style.marginTop = "14px"; host.append(rr.el); C.refreshers.push(rr.refresh);
   C.refreshers.push(() => {
     bsSel.value = S.bshape;
     const b = C.keepOut()?.bolts, sc = b?.filter((x) => !x.pin), pin = b?.find((x) => x.pin);
