@@ -9,7 +9,8 @@ export const download = (file, data) => { // hands a file from memory to the bro
   const url = URL.createObjectURL(new Blob([data])), a = Object.assign(document.createElement("a"), { href: url, download: file });
   a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
-export const esc =(t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); // for text put inside innerHTML
+export const plainLabel = (l) => l.replace(/\s*\(.*\)$/, ""); // "Thickness (mm)" → "Thickness", for undo messages
+export const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); // for text put inside innerHTML
 
 // one floating tip box for every "?" (shows on hover, and on tap/click until you click elsewhere)
 let tip = null, pinned = null;
@@ -49,7 +50,7 @@ export function toggle(label, onChange, helpId, track = true) {
   l.append(input, el("span", "knob"), el("span", "", label), help(helpId));
   input.onchange = () => {
     const v = input.checked; onChange(v);
-    if (track) record(`${label.replace(/\s*\(.*\)$/, "")}: ${v ? "on" : "off"}`, () => { input.checked = !v; onChange(!v); }, () => { input.checked = v; onChange(v); });
+    if (track) record(`${plainLabel(label)}: ${v ? "on" : "off"}`, () => { input.checked = !v; onChange(!v); }, () => { input.checked = v; onChange(v); });
   };
   return { el: l, input, set: (v) => (input.checked = v) };
 }
@@ -105,7 +106,7 @@ export function numberRow(o) {
   const end = () => { // one undo step per finished change
     if (from === null) return; const b = from, a = o.get(); from = null; if (a === b) return;
     const to = (v) => { o.set(v); o.live?.(); o.commit?.(); refresh(); }, r2 = (x) => Math.round(x * 100) / 100;
-    record(`${(o.name ?? o.label).replace(/\s*\(.*\)$/, "")}: ${r2(b)} → ${r2(a)}`, () => to(b), () => to(a));
+    record(`${plainLabel(o.name ?? o.label)}: ${r2(b)} → ${r2(a)}`, () => to(b), () => to(a));
   };
   r.oninput = () => { if (o.off?.()) return; if (from === null) from = o.get(); change(+r.value); };
   r.onchange = () => { if (o.off?.()) return; o.commit?.(); end(); };
@@ -126,10 +127,12 @@ export function numberRow(o) {
   return { el: d, refresh };
 }
 
-// Tab status (✔ / ⚠ on each tab) and the Next button at the bottom of the side panel.
+// The stage tabs: a click marks the tab and sends the "stage" event (each stage shows or hides its own panel),
+// the tab status (✔ / ⚠ on each tab) and the Next button at the bottom of the side panel.
 // checks = { stage: () => null when done, or a short text of what is missing }; stages without a check show nothing.
 export function initSteps(checks) {
   const spans = [...document.querySelectorAll("#steps span[data-s]")], box = document.getElementById("next");
+  spans.forEach((s) => (s.onclick = () => { spans.forEach((x) => x.classList.toggle("on", x === s)); document.dispatchEvent(new CustomEvent("stage", { detail: s.dataset.s })); }));
   const hint = el("div", "warn"), bNext = el("button");
   box.append(hint, bNext); spans.forEach((s) => s.append(el("span", "st")));
   let stage = "A", last = "";

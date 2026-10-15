@@ -4,6 +4,7 @@ import * as THREE from "three";
 import tc from "../../data/toolConnect.json";
 import { help, segmented, pick } from "../ui.js";
 import { record } from "../history.js";
+import { onViewClick } from "../viewer.js";
 import { head, btn, numRow } from "./rows.js";
 
 export function initPicking(C, host) {
@@ -68,12 +69,9 @@ export function initPicking(C, host) {
   // ---------- clicks in the 3D view ----------
   const hlMat = new THREE.MeshBasicMaterial({ color: 0x2ecc71, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   const avMat = new THREE.MeshBasicMaterial({ color: 0xe53935, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-  const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
-  let down = null;
-  dom.addEventListener("pointerdown", (e) => (down = [e.clientX, e.clientY]));
   const baseMesh = (o) => o.children.find((c) => c.userData.base);
   const shown = () => list.items().filter((i) => i.object.visible && baseMesh(i.object));
-  function pickAt(its) { // nearest hit among the main meshes of these list rows
+  function pickAt(its, ray) { // nearest hit among the main meshes of these list rows
     const ms = its.map((i) => { i.object.updateMatrixWorld(true); return baseMesh(i.object); });
     const hit = ray.intersectObjects(ms, false)[0]; return hit ? { it: its[ms.indexOf(hit.object)], hit } : null;
   }
@@ -81,13 +79,11 @@ export function initPicking(C, host) {
     const { fg, k } = faceInfo(obj), t3 = hit.faceIndex * 3;
     return fg.findIndex((g) => t3 >= (g.start / k) * 3 && t3 < ((g.start + g.count) / k) * 3);
   }
-  dom.addEventListener("pointerup", (e) => {
-    if (C.tab !== "C" || C.running || (e.button !== 0 && e.button !== 2) || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
+  onViewClick(dom, cam, (e, ray) => {
+    if (C.tab !== "C" || C.busy() || (e.button !== 0 && e.button !== 2)) return;
     prunePicked(); pruneAvoid();
-    const r = dom.getBoundingClientRect();
-    ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, cam);
     const pickable = (i) => i.deletable !== false; // the flange is never pickable here
-    const h = pickAt(shown().filter(pickable)); if (!h) return;
+    const h = pickAt(shown().filter(pickable), ray); if (!h) return;
     if (e.button === 2) { // right-click: clear whatever is under the cursor (green face, red face, red object)
       const fi = faceAt(h.it.object, h.hit);
       return act("Clear " + h.it.name, () => { if (fi >= 0) { removePick(h.it, fi); removeAvoid("face", h.it, fi); } removeAvoid("obj", h.it, null); });
@@ -98,7 +94,8 @@ export function initPicking(C, host) {
     const fi = faceAt(h.it.object, h.hit); if (fi < 0) return;
     act(`${mode === "connect" ? "Connect" : "Avoid"} face ${fi + 1} of ${h.it.name}`, () => (mode === "connect" ? toggleConnect(h.it, fi) : toggleAvoid("face", h.it, fi)));
   });
-  function dropEntry(en) { if (en.ov) { en.ov.parent?.remove(en.ov); en.ov.geometry.dispose(); en.ov = null; } }
+  const dropMesh = (m) => { m.parent?.remove(m); m.geometry.dispose(); };
+  function dropEntry(en) { if (en.ov) { dropMesh(en.ov); en.ov = null; } if (en.gap) { dropMesh(en.gap); en.gap = null; } }
   // forget entries of deleted rows, or whose mesh was replaced
   const prune = (arr) => { for (let i = arr.length - 1; i >= 0; i--) { const en = arr[i]; if (!list.items().includes(en.it) || en.it.object !== en.obj) { dropEntry(en); arr.splice(i, 1); } } };
   const prunePicked = () => prune(picked), pruneAvoid = () => prune(avoid);
@@ -130,6 +127,48 @@ export function initPicking(C, host) {
     const en = { key: kind + ":" + it.id + ":" + fi, kind, it, obj: it.object, fi, ov: null };
     overlay(en, kind === "obj" ? baseMesh(en.obj).geometry.index : faceIndices(en.obj, [fi]), avMat); avoid.push(en);
   }
+
+  // ---------- gap preview: a see-through red shell that shows how far each red item reaches (the two Avoided gap settings) ----------
+  // Built in the object's own space, so it moves with the object. The worker uses the exact gap; this is the view of it.
+  const gapMat = new THREE.MeshBasicMaterial({ color: 0xe53935, transparent: true, opacity: 0.2, side: THREE.DoubleSide, depthWrite: false });
+  let gapsShown = false;
+  const tn = (P, a, b, c) => { // unit normal of triangle a b c (vertex numbers), from its winding
+    const u = new THREE.Vector3(P[3*b] - P[3*a], P[3*b+1] - P[3*a+1], P[3*b+2] - P[3*a+2]), w = new THREE.Vector3(P[3*c] - P[3*a], P[3*c+1] - P[3*a+1], P[3*c+2] - P[3*a+2]);
+    const n = u.cross(w), l = n.length(); return l > 1e-12 ? n.divideScalar(l) : null;
+  };
+  function gapGeometry(en, mm) {
+    const src = baseMesh(en.obj).geometry, P = src.getAttribute("position").array;
+    const idx = en.kind === "obj" ? src.index.array : faceIndices(en.obj, [en.fi]);
+    const around = new Map(); // corner → normals of the triangles that meet there
+    const key = (v) => `${P[3*v].toFixed(3)},${P[3*v+1].toFixed(3)},${P[3*v+2].toFixed(3)}`; // the same corner can appear once per face
+    // each direction counts once: a cube corner touches 1 to 2 triangles per side, counting them all would tilt the corner (crooked cube)
+    for (let k = 0; k < idx.length; k += 3) { const n = tn(P, idx[k], idx[k+1], idx[k+2]); if (n) for (let q = 0; q < 3; q++) { const kk = key(idx[k+q]); if (!around.has(kk)) around.set(kk, new Map()); around.get(kk).set(`${n.x.toFixed(3)},${n.y.toFixed(3)},${n.z.toFixed(3)}`, n); } }
+    // each corner moves out along its mean normal, far enough that every face next to it moves by mm (a cube stays a sharp cube)
+    const moved = new Map(), out = (v) => {
+      const kk = key(v); if (moved.has(kk)) return moved.get(kk);
+      const ns = [...(around.get(kk)?.values() ?? [])], m = ns.reduce((s, n) => s.add(n), new THREE.Vector3()).normalize();
+      const cos = Math.max(0.35, Math.min(...ns.map((n) => m.dot(n)))), d = mm / cos;
+      const p = [P[3*v] + m.x * d, P[3*v+1] + m.y * d, P[3*v+2] + m.z * d]; moved.set(kk, p); return p;
+    };
+    const pos = [];
+    for (let k = 0; k < idx.length; k++) pos.push(...out(idx[k])); // the moved surface
+    if (en.kind === "face") { // a face: side walls between its outline and the moved copy, so it reads as a block
+      const edges = new Map();
+      for (let k = 0; k < idx.length; k += 3) for (let q = 0; q < 3; q++) { const a = idx[k+q], b = idx[k+(q+1)%3], e = a < b ? a + "," + b : b + "," + a; edges.set(e, edges.has(e) ? null : [a, b]); }
+      for (const e of edges.values()) if (e) { const [a, b] = e, A = [P[3*a], P[3*a+1], P[3*a+2]], B = [P[3*b], P[3*b+1], P[3*b+2]]; pos.push(...A, ...B, ...out(b), ...A, ...out(b), ...out(a)); }
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); return g;
+  }
+  function syncGaps() { // after a click, a gap change or a stage change
+    for (const en of avoid) {
+      const mm = en.kind === "face" ? S.gapFace : S.gapObj;
+      if (en.gap && en.gapMm !== mm) { dropMesh(en.gap); en.gap = null; }
+      if (!en.gap && mm > 0) { en.gap = new THREE.Mesh(gapGeometry(en, mm), gapMat); en.gap.raycast = () => {}; en.gapMm = mm; en.obj.add(en.gap); }
+      if (en.gap) en.gap.visible = gapsShown;
+    }
+  }
+  C.refreshers.push(syncGaps);
+  C.gapsVisible = (on) => { gapsShown = on; syncGaps(); };
 
   // ---------- triangles for the worker ----------
   function faceInfo(part) { // replicad gives face ranges in index units; k also accepts triangle units
@@ -170,7 +209,7 @@ export function initPicking(C, host) {
     return { items, tr };
   };
   C.startTris = (info, all) => { // all = whole tool start; otherwise only its top face (z = plate thickness)
-    const { v, n, t } = info.mesh, z0 = info.dims.thickness, out = [];
+    const { p: v, n, i: t } = info.mesh, z0 = info.dims.thickness, out = [];
     for (let i = 0; i < t.length; i += 3) {
       const q = [t[i], t[i + 1], t[i + 2]];
       if (!all && (n[q[0] * 3 + 2] < 0.9 || q.some((x) => Math.abs(v[x * 3 + 2] - z0) > 1e-3))) continue;
