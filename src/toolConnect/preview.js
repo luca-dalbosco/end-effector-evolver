@@ -59,7 +59,7 @@ export function initPreview(C) {
   dom.parentElement.append(legend);
 
   C.stageVisibility = (stage) => { // what the 3D view shows in each stage
-    const on = stage === "C";
+    const on = stage === "C" || stage === "G";
     C.clearanceVisible(on); legend.style.display = on ? "" : "none";
     if (C.ghost) C.ghost.visible = on; if (arrow) arrow.visible = on && S.method === "optimize"; if (C.coarseGhost) C.coarseGhost.visible = on;
     C.prev.forEach((m) => (m.visible = on && !C.result)); if (C.result) C.result.visible = on || stage === "D"; // stage D (Export) shows the connector too

@@ -85,6 +85,26 @@ const PAGES = {
       <p>If you use the contact link, your email app sends the message,
       and it is handled like any normal email.</p>`,
   },
+  shortcuts: {
+    title: 'Shortcuts',
+    html: `<table class="keys">
+      <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd></td><td>Undo the last action</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd><br><kbd>Ctrl</kbd> + <kbd>Y</kbd></td><td>Redo</td></tr>
+      <tr><td colspan="2"><b>3D view</b></td></tr>
+      <tr><td>Left-drag</td><td>Orbit the camera</td></tr>
+      <tr><td>Right-drag</td><td>Pan the camera</td></tr>
+      <tr><td>Mouse wheel</td><td>Zoom</td></tr>
+      <tr><td colspan="2"><b>Tab 2 Tool</b></td></tr>
+      <tr><td>Click an object</td><td>Select it</td></tr>
+      <tr><td>Drag an arrow / ring</td><td>Move / rotate the selected object</td></tr>
+      <tr><td colspan="2"><b>Tab 3 Preparation</b></td></tr>
+      <tr><td>Left-click a face</td><td>Use the Click tool (connect, avoid face or avoid object)</td></tr>
+      <tr><td><kbd>Shift</kbd> + click</td><td>Quick avoid: marks the face red</td></tr>
+      <tr><td>Right-click</td><td>Clear the green or red item under the cursor</td></tr>
+      <tr><td colspan="2"><b>Objects list</b></td></tr>
+      <tr><td>Double-click a name</td><td>Rename</td></tr>
+      </table>`,
+  },
   terms: {
     title: 'Terms and Conditions',
     html: `<p>This tool is provided "as is", without warranty of any kind.
@@ -100,6 +120,7 @@ const PAGES = {
 const ITEMS = [
   { label: 'About', page: 'about' },
   { label: 'Tutorial', action: 'welcome' },
+  { label: 'Shortcuts', page: 'shortcuts' },
   { label: 'Donate ☕', href: LINKS.donate },
   { label: 'Licence', page: 'licence' },
   { label: 'Credits', page: 'credits' },
@@ -120,6 +141,10 @@ dialog.footer-dialog{max-height:80vh;overflow:auto;max-width:480px;width:90vw;bo
   border-radius:8px;padding:20px;background:var(--bg,Canvas);color:var(--fg,CanvasText);
   font:14px/1.5 system-ui,sans-serif}
 dialog.footer-dialog::backdrop{background:#0008}
+dialog.footer-dialog table.keys{border-collapse:collapse;width:100%;font-size:13px}
+dialog.footer-dialog table.keys td{padding:5px 8px 5px 0;vertical-align:top;border-bottom:1px solid var(--line,#3a3b3f)}
+dialog.footer-dialog table.keys td:first-child{white-space:nowrap}
+dialog.footer-dialog kbd{font:12px ui-monospace,monospace;padding:1px 5px;border:1px solid var(--line,#3a3b3f);border-radius:4px;background:var(--chip,#2b2c30)}
 dialog.footer-dialog h2{margin:0 0 10px;font-size:18px}
 dialog.footer-dialog button{margin-top:12px;margin-right:6px;cursor:pointer}
 dialog.footer-dialog[data-welcome="1"]{max-width:560px}

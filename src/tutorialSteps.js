@@ -87,7 +87,7 @@ export const TUTORIAL_STEPS = [
   {
     title: 'Export and print',
     pill: 'Export',
-    text: 'Export the connector as STL or 3MF (tab 4 Export), then 3D print it.',
+    text: 'Export the connector as STL or 3MF (tab 5 Export), then 3D print it.',
     html: scene(`
       <g transform="translate(-60 10) scale(.55)" style="transform-box:view-box;transform-origin:0 0"><g class="tv-pop" ${d(.1)}><path d="${Y}" fill="currentColor" fill-opacity=".25"/><path d="M190 44H290" stroke="${B}" stroke-width="5"/><path d="M228 126H252" stroke="${O}" stroke-width="5"/></g></g>
       ${lbl(72, 100, 'connector')}

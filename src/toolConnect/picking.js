@@ -2,8 +2,9 @@
 // and the world-space triangles sent to the worker.
 import * as THREE from "three";
 import tc from "../../data/toolConnect.json";
-import { help, segmented } from "../ui.js";
-import { head, btn, clamp } from "./rows.js";
+import { help, segmented, pick } from "../ui.js";
+import { record } from "../history.js";
+import { head, btn, numRow } from "./rows.js";
 
 export function initPicking(C, host) {
   const { S, list, cam, dom } = C;
@@ -16,7 +17,7 @@ export function initPicking(C, host) {
   head(host, "Robot side surface");
   const sel = document.createElement("select");
   tc.toolStartConnection.options.forEach((o) => sel.add(new Option(o.label, o.id)));
-  sel.onchange = () => { S.conn = sel.value; C.schedule(); };
+  sel.onchange = pick(sel, "Robot side surface", () => S.conn, (v) => { S.conn = v; C.sync(); C.schedule(); });
   host.append(sel);
   C.refreshers.push(() => (sel.value = S.conn));
 
@@ -24,44 +25,43 @@ export function initPicking(C, host) {
   const tool = segmented([{ id: "connect", label: "Connect face" }, { id: "face", label: "Avoid face" }, { id: "object", label: "Avoid object" }], (id) => { clickMode = id; });
   tool.set(clickMode); host.append(tool.el);
 
-  const box = () => { const d = document.createElement("div"); d.style.cssText = "font-size:12px"; return d; };
-  head(host, "Connection faces");
-  const connBox = box();
-  host.append(connBox, btn("Clear connection faces", () => { picked.splice(0).forEach(dropEntry); after(); }));
-  head(host, "Avoid objects");
-  const objBox = box(); host.append(objBox);
-  head(host, "Avoid faces");
-  const faceBox = box();
-  host.append(faceBox, btn("Clear avoided", () => { avoid.splice(0).forEach(dropEntry); C.renderAvoid(); C.schedule(); }));
+  // undo: the green and red items are kept as a list of {kind, object, face}; restore() rebuilds the overlays
+  const snap = () => ({ p: picked.map((x) => ({ it: x.it, fi: x.fi, key: x.key })), a: avoid.map((x) => ({ kind: x.kind, it: x.it, fi: x.fi, key: x.key })) });
+  const same = (x, y) => x.p.map((q) => q.key).join() === y.p.map((q) => q.key).join() && x.a.map((q) => q.key).join() === y.a.map((q) => q.key).join();
+  function restore(sn) {
+    picked.splice(0).forEach(dropEntry); avoid.splice(0).forEach(dropEntry);
+    const live = (x) => list.items().includes(x.it);
+    sn.p.filter(live).forEach((x) => addPick(x.it, x.fi)); sn.a.filter(live).forEach((x) => addAvoid(x.kind, x.it, x.fi));
+    after();
+  }
+  function act(label, fn) { // one undo step for a change of the green / red items
+    const b = snap(); fn(); after();
+    const a = snap(); if (!same(a, b)) record(label, () => restore(b), () => restore(a));
+  }
 
-  C.cfgOf = (en) => (en.kind === "face" ? tc.avoid.faceExtrudeMm : tc.avoid.objectGrowMm);
+  // ---------- summary and reset buttons ----------
+  const box = () => { const d = document.createElement("div"); d.style.cssText = "font-size:12px"; return d; };
+  head(host, "Connection and avoid");
+  const connBox = box(), avBox = box();
+  connBox.style.marginBottom = "4px"; avBox.style.margin = "10px 0 4px";
+  host.append(connBox, btn("Reset connection faces", () => act("Reset connection faces", () => picked.splice(0).forEach(dropEntry))));
+  host.append(avBox, btn("Reset avoided", () => act("Reset avoided", () => avoid.splice(0).forEach(dropEntry))));
+  const gaps = document.createElement("div"); gaps.style.marginTop = "10px"; host.append(gaps);
+  numRow(C, gaps, "Avoided objects gap (mm)", tc.avoid.objectGrowMm, "gapObj", undefined, undefined, "gapObjects");
+  numRow(C, gaps, "Avoided faces gap (mm)", tc.avoid.faceExtrudeMm, "gapFace", undefined, undefined, "gapFaces");
+  const looseBox = box(); host.append(looseBox);
+
+  const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
   C.renderAvoid = () => {
-    prunePicked(); pruneAvoid(); connBox.innerHTML = objBox.innerHTML = faceBox.innerHTML = "";
-    const addRow = (box, text, c, get, set, unit, onRemove) => {
-      const row = document.createElement("div"); row.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:3px 0";
-      const lab = document.createElement("span"); lab.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"; lab.textContent = text; row.append(lab);
-      if (c) {
-        lab.title = c.note;
-        const n = Object.assign(document.createElement("input"), { type: "number", step: c.step, value: get() }); n.style.width = "64px";
-        n.onchange = () => { let v = +n.value; if (n.value === "" || isNaN(v) || v < 0) { n.value = get(); return; } if (!C.advanced) v = clamp(v, c); set(v); n.value = v; C.schedule(); };
-        const u = document.createElement("span"); u.textContent = unit; row.append(n, u);
-      }
-      if (onRemove) { const x = btn("✕", onRemove); x.title = "Remove"; row.append(x); }
-      box.append(row);
-    };
-    if (!picked.length) { const e = document.createElement("div"); e.className = "rec"; e.textContent = "None yet. Pick \"Connect face\" above and click a face of a tool object."; connBox.append(e); }
-    picked.forEach((p) => addRow(connBox, `Face ${p.fi + 1} of ${p.it.name}`, null, null, null, null, () => { picked.splice(picked.indexOf(p), 1); dropEntry(p); after(); }));
-    addRow(objBox, "Flange Clearance (below the robot side)", tc.avoid.robotOffsetMm, () => C.robot.mm, (v) => { C.robot.mm = v; C.drawRobot(); }, "mm offset");
-    avoid.forEach((en) => addRow(
-      en.kind === "face" ? faceBox : objBox,
-      en.kind === "face" ? `Face ${en.fi + 1} of ${en.it.name}` : en.it.name,
-      C.cfgOf(en), () => en.mm, (v) => (en.mm = v), en.kind === "face" ? "mm gap out" : "mm gap",
-      () => { avoid.splice(avoid.indexOf(en), 1); dropEntry(en); C.renderAvoid(); C.schedule(); }));
+    prunePicked(); pruneAvoid(); looseBox.textContent = "";
+    const fc = avoid.filter((x) => x.kind === "face").length, oc = avoid.length - fc;
+    connBox.textContent = picked.length ? `Connected: ${n(picked.length, "face", "faces")}` : "Connected: 0 faces. Pick \"Connect face\" above and click a face of a tool object.";
+    avBox.textContent = avoid.length ? `Avoided: ${n(fc, "face", "faces")}, ${n(oc, "object", "objects")}` : "Avoided: 0 faces, 0 objects";
     const loose = list.items().filter((i) => i.deletable !== false && !picked.some((p) => p.it === i) && !avoid.some((en) => en.it === i));
     if (loose.length) {
       const w = document.createElement("div"); w.className = "warn"; w.style.marginTop = "6px";
       w.textContent = `⚠ Not connected and not avoided: ${loose.map((i) => i.name).join(", ")}. The connector may grow through ${loose.length > 1 ? "them" : "it"}. Use "Avoid object" to keep it clear.`;
-      objBox.append(w);
+      looseBox.append(w);
     }
   };
 
@@ -82,7 +82,7 @@ export function initPicking(C, host) {
     return fg.findIndex((g) => t3 >= (g.start / k) * 3 && t3 < ((g.start + g.count) / k) * 3);
   }
   dom.addEventListener("pointerup", (e) => {
-    if (!C.active || C.running || (e.button !== 0 && e.button !== 2) || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
+    if (C.tab !== "C" || C.running || (e.button !== 0 && e.button !== 2) || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
     prunePicked(); pruneAvoid();
     const r = dom.getBoundingClientRect();
     ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, cam);
@@ -90,18 +90,13 @@ export function initPicking(C, host) {
     const h = pickAt(shown().filter(pickable)); if (!h) return;
     if (e.button === 2) { // right-click: clear whatever is under the cursor (green face, red face, red object)
       const fi = faceAt(h.it.object, h.hit);
-      if (fi >= 0) { removePick(h.it, fi); removeAvoid("face", h.it, fi); }
-      removeAvoid("obj", h.it, null);
-      return after();
+      return act("Clear " + h.it.name, () => { if (fi >= 0) { removePick(h.it, fi); removeAvoid("face", h.it, fi); } removeAvoid("obj", h.it, null); });
     }
     const mode = e.shiftKey ? (clickMode === "object" ? "object" : "face") : clickMode; // shift-click = quick avoid
-    if (mode === "object") toggleAvoid("obj", h.it, null);
-    else {
-      if (!(h.it.object.userData.fg || []).length) return C.setInfo("bad", "✖ This part has no face data. Re-add it in step 2.");
-      const fi = faceAt(h.it.object, h.hit); if (fi < 0) return;
-      if (mode === "connect") toggleConnect(h.it, fi); else toggleAvoid("face", h.it, fi);
-    }
-    after();
+    if (mode === "object") return act("Avoid object " + h.it.name, () => toggleAvoid("obj", h.it, null));
+    if (!(h.it.object.userData.fg || []).length) return C.setInfo("bad", "✖ This part has no face data. Re-add it in step 2.");
+    const fi = faceAt(h.it.object, h.hit); if (fi < 0) return;
+    act(`${mode === "connect" ? "Connect" : "Avoid"} face ${fi + 1} of ${h.it.name}`, () => (mode === "connect" ? toggleConnect(h.it, fi) : toggleAvoid("face", h.it, fi)));
   });
   function dropEntry(en) { if (en.ov) { en.ov.parent?.remove(en.ov); en.ov.geometry.dispose(); en.ov = null; } }
   // forget entries of deleted rows, or whose mesh was replaced
@@ -119,14 +114,20 @@ export function initPicking(C, host) {
     const key = "c:" + it.id + ":" + fi, at = picked.findIndex((x) => x.key === key);
     if (at >= 0) { dropEntry(picked[at]); picked.splice(at, 1); return; }
     removeAvoid("face", it, fi); removeAvoid("obj", it, null);
-    const en = { key, it, obj: it.object, fi, ov: null };
+    addPick(it, fi);
+  }
+  function addPick(it, fi) {
+    const en = { key: "c:" + it.id + ":" + fi, it, obj: it.object, fi, ov: null };
     overlay(en, faceIndices(en.obj, [fi]), hlMat); picked.push(en);
   }
   function toggleAvoid(kind, it, fi) { // a face cannot be both green and red: picking red removes green
     const key = kind + ":" + it.id + ":" + fi, at = avoid.findIndex((x) => x.key === key);
     if (at >= 0) { dropEntry(avoid[at]); avoid.splice(at, 1); return; }
     if (kind === "obj") removePick(it, null); else removePick(it, fi);
-    const en = { key, kind, it, obj: it.object, fi, mm: kind === "face" ? tc.avoid.faceExtrudeMm.default : tc.avoid.objectGrowMm.default, ov: null };
+    addAvoid(kind, it, fi);
+  }
+  function addAvoid(kind, it, fi) {
+    const en = { key: kind + ":" + it.id + ":" + fi, kind, it, obj: it.object, fi, ov: null };
     overlay(en, kind === "obj" ? baseMesh(en.obj).geometry.index : faceIndices(en.obj, [fi]), avMat); avoid.push(en);
   }
 
@@ -164,7 +165,7 @@ export function initPicking(C, host) {
       en.obj.updateMatrixWorld(true);
       const { mesh, fg, k } = faceInfo(en.obj);
       const t = trisOf(mesh, en.kind === "obj" ? null : [range(fg[en.fi], k)]);
-      items.push({ kind: en.kind, mm: en.mm, tris: t }); tr.push(t.buffer);
+      items.push({ kind: en.kind, mm: en.kind === "face" ? S.gapFace : S.gapObj, tris: t }); tr.push(t.buffer);
     }
     return { items, tr };
   };

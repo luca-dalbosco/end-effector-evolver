@@ -6,7 +6,7 @@ export function initExport({ geo, $, list, toolEnd, toolConnect, getStart, getFl
   const S = { scope: ex.scope.default, withStart: ex.withToolStart.default, withEnd: ex.withToolEnd.default, format: ex.format.default, res: ex.resolution.default, tol: ex.toleranceMm.default, ang: ex.angleDeg.default };
   let advanced = false, busy = false;
   const el = (tag, text = "", css = "") => { const e = document.createElement(tag); e.textContent = text; e.style.cssText = css; return e; };
-  const head = (t) => el("div", t, "font-weight:700;margin:14px 0 4px");
+  const head = (t) => el("div", t, "font-weight:600;margin:14px 0 6px;padding-top:10px;border-top:1px solid var(--line)");
   const note = (t) => { const d = el("div", t); d.className = "rec"; return d; };
   const labelled = (input, text, css = "display:block;margin:4px 0") => { const l = el("label", "", css); l.append(input, " " + text); return l; };
   const selectOf = (opts, onchange) => { const s = el("select"); opts.forEach((o) => s.add(new Option(o.label, o.id))); s.onchange = () => { onchange(s.value); refresh(); }; return s; };
@@ -57,13 +57,13 @@ export function initExport({ geo, $, list, toolEnd, toolConnect, getStart, getFl
       if (!getStart()) return { error: "The robot side is not built yet." };
       items.push(start);
     } else if (S.scope === "tool") {
-      if (!conn) return { error: "No connector yet. Make one in step 3 (Generate)." };
+      if (!conn) return { error: "No connector yet. Make one in step 4 (Generation)." };
       if (S.withStart) items.push(start);
       items.push(conn);
       if (S.withEnd) { const e = parts.find((i) => i.object === endObj); if (e) items.push(part(e, false)); else notes.push("There is no tool part to include."); }
     } else {
       if (getStart()) items.push(start);
-      if (conn) items.push(conn); else notes.push("No connector yet (step 3), so it is left out.");
+      if (conn) items.push(conn); else notes.push("No connector yet (step 4), so it is left out.");
       parts.forEach((i) => items.push(part(i, true)));
     }
     return { items, notes };

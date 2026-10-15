@@ -1,6 +1,7 @@
 // Shared UI kit: collapsible sections, "?" help icons (texts in data/help.json), switches, button groups,
 // and the one Advanced switch under the stage tabs (each stage keeps its own on/off).
 import helpText from "../data/help.json";
+import { record } from "./history.js";
 
 export const el = (tag, cls = "", text = "") => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
 export const line = (cls, text) => el("div", cls, text); // one message line (text is never parsed as HTML)
@@ -23,8 +24,9 @@ function showTip(icon) {
 const hideTip = () => { if (tip) tip.style.display = "none"; };
 document.addEventListener("click", () => { pinned = null; hideTip(); });
 
-export function help(id) {
-  const t = helpText[id]; if (!t) return document.createTextNode("");
+export const help = (id) => tipIcon(helpText[id]);
+export function tipIcon(t) { // "?" icon with this text
+  if (!t) return document.createTextNode("");
   const s = el("span", "help", "?"); s.dataset.tip = t; s.tabIndex = 0;
   s.onmouseenter = () => showTip(s); s.onmouseleave = () => { if (pinned !== s) hideTip(); };
   s.onclick = (e) => { e.preventDefault(); e.stopPropagation(); if (pinned === s) { pinned = null; hideTip(); } else { pinned = s; showTip(s); } };
@@ -42,20 +44,35 @@ export function section(title, helpId, open = true) {
 }
 
 // on/off switch
-export function toggle(label, onChange, helpId) {
+export function toggle(label, onChange, helpId, track = true) {
   const l = el("label", "switch"), input = Object.assign(el("input"), { type: "checkbox" });
   l.append(input, el("span", "knob"), el("span", "", label), help(helpId));
-  input.onchange = () => onChange(input.checked);
+  input.onchange = () => {
+    const v = input.checked; onChange(v);
+    if (track) record(`${label.replace(/\s*\(.*\)$/, "")}: ${v ? "on" : "off"}`, () => { input.checked = !v; onChange(!v); }, () => { input.checked = v; onChange(v); });
+  };
   return { el: l, input, set: (v) => (input.checked = v) };
 }
 
 // button group, one option active: options = [{ id, label }]
-export function segmented(options, onChange) {
-  const box = el("div", "seg");
-  const btns = options.map((o) => { const b = el("button", "", o.label); b.type = "button"; b.dataset.id = o.id; b.onclick = () => { set(o.id); onChange(o.id); }; box.append(b); return b; });
-  const set = (id) => btns.forEach((b) => b.classList.toggle("on", b.dataset.id === id));
+export function segmented(options, onChange, label = "") { // label given = the choice can be undone
+  const box = el("div", "seg"); let now = null;
+  const nameOf = (id) => options.find((o) => o.id === id)?.label ?? id;
+  const btns = options.map((o) => { const b = el("button", "", o.label); b.type = "button"; b.dataset.id = o.id; b.onclick = () => {
+    const prev = now; set(o.id); onChange(o.id);
+    if (label && prev && prev !== o.id) record(`${label}: ${nameOf(o.id)}`, () => { set(prev); onChange(prev); }, () => { set(o.id); onChange(o.id); });
+  }; box.append(b); return b; });
+  const set = (id) => { now = id; btns.forEach((b) => b.classList.toggle("on", b.dataset.id === id)); };
   const enable = (id, on, tip = "") => btns.forEach((b) => { if (b.dataset.id === id) { b.disabled = !on; b.title = on ? "" : tip; } }); // greyed out with a hover tip
   return { el: box, set, enable };
+}
+
+// Makes a <select> undoable: get() = the current value of the setting (read before the change), apply(value) does the change.
+export function pick(s, label, get, apply) {
+  return () => {
+    const b = get(), a = s.value; apply(a);
+    record(`${label}: ${a}`, () => { s.value = b; apply(b); }, () => { s.value = a; apply(a); });
+  };
 }
 
 // Colour of a typed value: green inside the recommended range, red inside the not-recommended range or outside min..max, orange otherwise.
@@ -76,20 +93,27 @@ export const recNote = (cfg) => [cfg.recommendedRange && `recommended ${cfg.reco
 //   bounds()  moving slider range [min, max], rate(v) colour class of the value (default rateOf), digits: rounding of the shown value }
 // Returns { el, refresh }: put refresh in the stage's refresh list.
 export function numberRow(o) {
-  const cfg = o.cfg, d = el("div", "row"), l = el("label", "", o.label);
+  const cfg = o.cfg, d = el("div", o.compact ? "cmp" : "row"), l = el("label", "", o.label);
   const r = Object.assign(el("input"), { type: "range", min: cfg.min, max: cfg.max, step: cfg.step });
   const n = Object.assign(el("input"), { type: "number", step: cfg.step });
-  if (o.help) l.append(help(o.help));
-  d.append(l, r, n); if (o.note) d.append(el("div", "rec", o.note));
+  const tipText = [helpText[o.help], o.note].filter(Boolean).join(" "); // the grey note under the row lives in the "?" now (the number colour shows ok / warn)
+  if (tipText && !o.compact) l.append(tipIcon(tipText));
+  if (o.compact) d.append(l, n); else d.append(l, r, n);
   const shown = (v) => (o.digits == null ? v : Math.round(v * 10 ** o.digits) / 10 ** o.digits);
   const change = (v) => { o.set(v); o.live?.(); };
-  r.oninput = () => { if (!o.off?.()) change(+r.value); };
-  r.onchange = () => { if (!o.off?.()) o.commit?.(); };
+  let from = null; // value before the current slider drag or typed value (for undo)
+  const end = () => { // one undo step per finished change
+    if (from === null) return; const b = from, a = o.get(); from = null; if (a === b) return;
+    const to = (v) => { o.set(v); o.live?.(); o.commit?.(); refresh(); }, r2 = (x) => Math.round(x * 100) / 100;
+    record(`${(o.name ?? o.label).replace(/\s*\(.*\)$/, "")}: ${r2(b)} → ${r2(a)}`, () => to(b), () => to(a));
+  };
+  r.oninput = () => { if (o.off?.()) return; if (from === null) from = o.get(); change(+r.value); };
+  r.onchange = () => { if (o.off?.()) return; o.commit?.(); end(); };
   n.onchange = () => {
     let v = +n.value;
     if (n.value === "" || isNaN(v) || o.off?.()) return refresh();
     if (o.clamp?.()) { const [lo, hi] = o.bounds ? o.bounds() : [cfg.min, cfg.max]; v = Math.min(hi, Math.max(lo, v)); }
-    change(v); o.commit?.();
+    from = o.get(); change(v); o.commit?.(); end();
   };
   function refresh() {
     d.style.display = o.hidden?.() ? "none" : "";
@@ -124,13 +148,14 @@ export function initSteps(checks) {
 }
 
 // Advanced switch: sits under the tabs, shows the state of the current stage. Stages listen to the "advanced" event.
-const ADV_STAGES = ["A", "C", "D"]; // stages that have advanced settings (stage B has none, so the switch is hidden there)
+const ADV_STAGES = ["A", "C", "D"]; // tab 4 Generation (G) shares the switch of tab 3 (C) // stages that have advanced settings (stage B has none, so the switch is hidden there)
 export function initAdvanced(host) {
   const on = Object.fromEntries(ADV_STAGES.map((s) => [s, false]));
   let stage = "A";
-  const sw = toggle("Advanced mode", (v) => { on[stage] = v; document.dispatchEvent(new CustomEvent("advanced", { detail: { stage, on: v } })); }, "advanced");
+  const key = () => (stage === "G" ? "C" : stage);
+  const sw = toggle("Advanced mode", (v) => { on[key()] = v; document.dispatchEvent(new CustomEvent("advanced", { detail: { stage: key(), on: v } })); }, "advanced", false);
   host.append(sw.el);
-  const show = () => { host.style.display = stage in on ? "" : "none"; if (stage in on) sw.set(on[stage]); };
+  const show = () => { host.style.display = key() in on ? "" : "none"; if (key() in on) sw.set(on[key()]); };
   document.addEventListener("stage", (e) => { stage = e.detail; show(); });
   show();
 }

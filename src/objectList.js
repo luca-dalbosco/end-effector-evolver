@@ -69,6 +69,7 @@ export function initObjectList({ view }) {
       it.name = unique(name, it); items.push(it); apply(it); render(); return it;
     },
     remove, select,
+    readd(it) { if (!items.includes(it)) { items.push(it); apply(it); render(); } }, // puts a removed row back (Undo)
     items: () => items,
     setName: (it, name) => { it.name = unique(name, it); render(); },
     setVis: (it, v) => { it.vis = v; apply(it); render(); }, // 0 visible, 1 transparent, 2 not visible
