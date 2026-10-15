@@ -6,24 +6,16 @@
       "id": "kuka-kr4-r600",
       "brand": "KUKA",
       "model": "KR 4 R600",
-      "source": "KUKA KR 4 R600 datasheet, mounting flange drawing; centre hole confirmed by the user on the physical flange",
+      "status": "Needs printed verification",
+      "source": "KUKA KR 4 R600 datasheet, mounting flange drawing; centre hole confirmed by the user on the physical flange; wall pockets from the user",
       "geometry": {
         "pitchCircleDiameter": 31.5,
-        "positionCount": 8,
-        "angularPitchDeg": 45,
         "threadedHoles": {
           "count": 7,
           "thread": "M5",
           "threadDepth": 5,
-          "anglesDeg": [
-            45,
-            90,
-            135,
-            180,
-            225,
-            270,
-            315
-          ]
+          "startAngleDeg": 45,
+          "spacingDeg": 45
         },
         "locatingPin": {
           "diameter": 5,
@@ -34,7 +26,16 @@
         "raisedSpigot": {
           "diameter": 40,
           "fit": "h7",
-          "height": 5.5
+          "height": 5.5,
+          "wallPockets": {
+            "count": 12,
+            "diameter": 6,
+            "depth": 5.5,
+            "pitchCircleDiameter": 44,
+            "startAngleDeg": 15,
+            "spacingDeg": 30,
+            "direction": "clockwise"
+          }
         },
         "centreHole": {
           "diameter": 20,
@@ -47,13 +48,77 @@
       "id": "kuka-kr180-r2500",
       "brand": "KUKA",
       "model": "KR 180 R2500",
-      "status": "needs data"
+      "status": "Needs printed verification",
+      "source": "KUKA KR 180 R2500 datasheet, mounting flange drawing; spigot height, centre hole depth and wall pockets from the user's STEP file",
+      "geometry": {
+        "pitchCircleDiameter": 125,
+        "threadedHoles": {
+          "count": 11,
+          "thread": "M10",
+          "threadDepth": 16,
+          "startAngleDeg": 30,
+          "spacingDeg": 30
+        },
+        "locatingPin": {
+          "diameter": 10,
+          "fit": "H7",
+          "depth": 10,
+          "angleDeg": 0
+        },
+        "raisedSpigot": {
+          "diameter": 140,
+          "fit": "h7",
+          "height": 13.4
+        },
+        "centreHole": {
+          "diameter": 80,
+          "fit": "H7",
+          "depth": 6.5,
+          "wallPockets": {
+            "count": 3,
+            "diameter": 21,
+            "depth": 7,
+            "pitchCircleDiameter": 65,
+            "startAngleDeg": 30,
+            "spacingDeg": 120,
+            "direction": "clockwise"
+          }
+        }
+      }
     },
     {
       "id": "ur3e",
       "brand": "Universal Robots",
       "model": "UR3e",
-      "status": "needs data"
+      "status": "Needs printed verification",
+      "source": "Universal Robots UR3e tool flange drawing; centre hole depth from the user's STEP file",
+      "geometry": {
+        "pitchCircleDiameter": 50,
+        "threadedHoles": {
+          "count": 4,
+          "thread": "M6",
+          "threadDepth": 6,
+          "drillDepth": 7,
+          "startAngleDeg": 45,
+          "spacingDeg": 90
+        },
+        "locatingPin": {
+          "diameter": 6,
+          "fit": "H7",
+          "depth": 6.2,
+          "angleDeg": 0
+        },
+        "raisedSpigot": {
+          "diameter": 63,
+          "fit": "h8",
+          "height": 8.5
+        },
+        "centreHole": {
+          "diameter": 31.5,
+          "fit": "H7",
+          "depth": 6.2
+        }
+      }
     }
   ]
 }

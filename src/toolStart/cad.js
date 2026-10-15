@@ -4,6 +4,7 @@
 // The screw access face is at z = t (away from the robot).
 import opencascade from "replicad-opencascadejs";
 import { setOC, draw, makeCylinder } from "replicad";
+import ts from "../../data/toolStart.json";
 
 let ready = false;
 export async function initKernel(opts) {
@@ -13,35 +14,67 @@ export async function initKernel(opts) {
   ready = true;
 }
 
-const SCREW_HEADS = {
-  M3: { d: 5.5, h: 3 },
-  M4: { d: 7, h: 4 },
-  M5: { d: 8.5, h: 5 },
-  M6: { d: 10, h: 6 },
-  M8: { d: 13, h: 8 },
-  M10: { d: 16, h: 10 },
-  M12: { d: 18, h: 12 },
-};
-const HEAD_MARGIN = 0.25;
-const MIN_REMAINING = 1;
+// Socket head cap screws (ISO 4762): head diameter and height per thread, from data/toolStart.json
+const sc = ts.screwClearance;
+const SCREW_HEADS = Object.fromEntries(Object.keys(sc.headDiameterByScrew).map((m) => [m, { d: sc.headDiameterByScrew[m], h: sc.headHeightByScrew[m] }]));
+const HEAD_MARGIN = sc.headDiameterMargin;
+const MIN_REMAINING = sc.rules.minRemainingMaterial;
 const EPS = 1e-9;
+const KEY_OVERLAP = 0.5; // how far a key sinks into the wall or plate so it fuses cleanly
 
+// used when a setting is missing; every value comes from data/toolStart.json
+const TOL = ts.tolerances;
 export const DEFAULT_SETTINGS = {
-  fitMode: "plate", // plate | plate-spigot | plate-spigot-collar
-  thickness: 3,
-  tolerances: { screwHole: 0.2, spigot: 0.3, collar: 0.3, dowelHole: 0.05, dowelPin: 0.15 },
-  plateMargin: 0.5,
-  spigotStyle: "holed",
-  dowelMode: "hole", // hole | printedPin
-  headSeat: "none", // none | countersink | counterbore
-  headDiameter: null, // null = head diameter + 0.25
-  seatLength: null, // null = counterbore: min(head height, t - 1)
-  chamfer: { robotFacing: false, awayFacing: false, size: 0.5 },
+  fitMode: ts.fitMode.default, // plate | plate-spigot | plate-spigot-collar
+  thickness: ts.thickness.default,
+  tolerances: Object.fromEntries(Object.entries(TOL).filter(([, v]) => typeof v === "object").map(([k, v]) => [k, v.default])),
+  plateMargin: ts.plateEdgeMargin.default,
+  spigotStyle: ts.spigotStyle.default,
+  wallKeys: ts.wallKeys.default, // keys that fit the flange wall pockets
+  dowelMode: ts.dowel.mode.default, // hole | printedPin
+  headSeat: sc.headSeat.default, // none | countersink | counterbore
+  headDiameter: null, // null = head diameter + margin
+  seatLength: null, // null = counterbore: min(head height, t - min remaining material)
+  chamfer: { robotFacing: ts.chamfer.robotFacing.default, awayFacing: ts.chamfer.awayFacing.default, size: ts.chamfer.size.default },
 };
-export const CHAMFER_SIZE = 0.5;
+
+// replicad booleans do not free their inputs (OpenCascade memory is not garbage collected): these do.
+const cutBy = (body, tool) => { const r = body.cut(tool); body.delete(); tool.delete(); return r; };
+const fuseWith = (body, tool) => { const r = body.fuse(tool); body.delete(); tool.delete(); return r; };
+const keepIn = (body, tool) => { const r = body.intersect(tool); body.delete(); tool.delete(); return r; };
 
 function cyl(diameter, z0, z1, x = 0, y = 0) {
   return makeCylinder(diameter / 2, z1 - z0, [x, y, z0], [0, 0, 1]);
+}
+
+// Screw hole angles: from the pattern (count, startAngleDeg, spacingDeg), or from an explicit anglesDeg list (older local flanges).
+export function holeAngles(h) {
+  if (Array.isArray(h.anglesDeg)) return h.anglesDeg;
+  return Array.from({ length: h.count }, (_, i) => +(h.startAngleDeg + i * h.spacingDeg).toFixed(4));
+}
+
+// Wall keys: one small cylinder per pocket in the flange wall, so the printed part locks into them.
+// kind "spigot": pockets are in the flange centre hole wall, keys stick OUT of the spigot wall (wallR = spigot outer radius).
+// kind "collar": pockets are in the flange raised spigot wall, keys stick IN from the collar wall (wallR = collar inner radius).
+function addWallKeys(body, pockets, kind, wallR, tol, depth, warnings) {
+  const keyD = pockets.diameter - 2 * tol;
+  const len = Math.min(depth, pockets.depth - tol);
+  const pr = pockets.pitchCircleDiameter / 2;
+  const reach = kind === "spigot" ? pr + keyD / 2 - wallR : wallR - (pr - keyD / 2);
+  if (keyD <= 0 || len <= 0 || reach <= EPS) {
+    warnings.push(`Wall keys for the ${kind} were skipped: the pockets do not reach the printed wall or are too small for the tolerance.`);
+    return { body, n: 0 };
+  }
+  const dir = pockets.direction === "counterclockwise" ? 1 : -1; // seen from the tool side (+Z)
+  const trimR = kind === "spigot" ? wallR - KEY_OVERLAP : wallR + KEY_OVERLAP;
+  for (let i = 0; i < pockets.count; i++) {
+    const a = (dir * (pockets.startAngleDeg + i * pockets.spacingDeg) * Math.PI) / 180;
+    let key = cyl(keyD, -len, KEY_OVERLAP, pr * Math.cos(a), pr * Math.sin(a));
+    const ring = cyl(2 * trimR, -len - 1, 1);
+    key = kind === "spigot" ? cutBy(key, ring) : keepIn(key, ring);
+    body = fuseWith(body, key);
+  }
+  return { body, n: pockets.count };
 }
 
 // Revolve a closed (r, z) profile around the Z axis.
@@ -81,10 +114,11 @@ export function buildToolStart(flange, userSettings = {}) {
   if (!hasRaised && !g.outerDiameter) errors.push("Flange needs an outer diameter.");
   const tol = s.tolerances;
 
-  if (t < 1 || t > 10) errors.push("Thickness must be between 1 and 10 mm.");
-  if (t < 1.5) warnings.push("Thickness below 1.5 mm is not recommended.");
+  const th = ts.thickness, rng = (v, r) => v >= r[0] && v <= r[1];
+  if (t < th.min || t > th.max) errors.push(`Thickness must be between ${th.min} and ${th.max} mm.`);
+  if (t < th.recommendedRange[0]) warnings.push(`Thickness below ${th.recommendedRange[0]} mm is not recommended.`);
   if ((chRobot || chAway) && t < 3 * c - EPS)
-    errors.push("Thickness too small for 0.5 mm chamfers (minimum 1.5 mm).");
+    errors.push(`Thickness too small for ${c} mm chamfers (minimum ${+(3 * c).toFixed(2)} mm).`);
 
   const screw = g.threadedHoles.thread; // e.g. "M5"
   const M = parseFloat(screw.slice(1));
@@ -92,7 +126,8 @@ export function buildToolStart(flange, userSettings = {}) {
   if (!head) errors.push(`No ISO 4762 head data for ${screw}.`);
   const holeD = M + 2 * tol.screwHole;
   const headD = s.headDiameter ?? (head ? head.d + HEAD_MARGIN : holeD);
-  if (tol.screwHole <= 0.05) warnings.push("Screw hole tolerance 0 to 0.05 is not recommended.");
+  const bad = TOL.screwHole.notRecommendedRange;
+  if (rng(tol.screwHole, bad)) warnings.push(`Screw hole tolerance ${bad[0]} to ${bad[1]} is not recommended.`);
 
   // Head seat rules
   let seat = { type: s.headSeat, length: 0, proud: 0 };
@@ -121,8 +156,9 @@ export function buildToolStart(flange, userSettings = {}) {
   if (hasCollar) tolsUsed.push(tol.collar);
   const depth = baseDepth - (tolsUsed.length ? Math.max(...tolsUsed) : 0);
   if (hasSpigot && !full && bore <= 0) errors.push("Thickness too large: the spigot bore would close completely.");
-  if (hasSpigot && (tol.spigot < 0.2 || tol.spigot > 0.5)) warnings.push("Spigot tolerance outside the recommended 0.2 to 0.5 mm.");
-  if (hasCollar && (tol.collar < 0.2 || tol.collar > 0.5)) warnings.push("Collar tolerance outside the recommended 0.2 to 0.5 mm.");
+  const recS = TOL.spigot.recommendedRange, recC = TOL.collar.recommendedRange;
+  if (hasSpigot && !rng(tol.spigot, recS)) warnings.push(`Spigot tolerance outside the recommended ${recS[0]} to ${recS[1]} mm.`);
+  if (hasCollar && !rng(tol.collar, recC)) warnings.push(`Collar tolerance outside the recommended ${recC[0]} to ${recC[1]} mm.`);
 
   // Plate outer diameter
   let plateOuter = g.raisedSpigot?.diameter ?? g.outerDiameter ?? 0;
@@ -133,7 +169,7 @@ export function buildToolStart(flange, userSettings = {}) {
   plateOuter = Math.max(plateOuter, 2 * (pcdR + headD / 2 + margin));
 
   // Screw arrangement check (closest pair of screw centres)
-  const angles = g.threadedHoles.anglesDeg;
+  const angles = holeAngles(g.threadedHoles);
   let minGap = Infinity;
   for (let i = 0; i < angles.length; i++)
     for (let j = i + 1; j < angles.length; j++) {
@@ -148,7 +184,7 @@ export function buildToolStart(flange, userSettings = {}) {
 
   // Axisymmetric body in one revolve (no booleans). Corners flagged "ch" are convex corners
   // that receive a 45 degree chamfer (robot-facing or away-facing planar faces only).
-  const rb = (hasSpigot ? bore : g.centreHole?.diameter ?? 0) / 2;
+  const rb = (hasSpigot ? bore : full ? 0 : g.centreHole?.diameter ?? 0) / 2; // Plate + Full = closed plate
   const rs = spigotOuter / 2;
   const rp = plateOuter / 2;
   const rci = collarInner / 2, rco = collarOuter / 2;
@@ -175,12 +211,25 @@ export function buildToolStart(flange, userSettings = {}) {
       return [dx / L, dz / L, L];
     };
     const ua = unit(A), ub = unit(B);
-    if (ua[2] < c - EPS || ub[2] < c - EPS) errors.push("An edge is too short for the 0.5 mm chamfer.");
+    if (ua[2] < c - EPS || ub[2] < c - EPS) errors.push(`An edge is too short for the ${c} mm chamfer.`);
     pts.push([v.p[0] + c * ua[0], v.p[1] + c * ua[1]], [v.p[0] + c * ub[0], v.p[1] + c * ub[1]]);
   });
   if (errors.length) return { ok: false, errors, warnings };
   let body = revolveProfile(pts);
   const profile = pts;
+
+  // Wall keys (before the screw holes, so any overlap gets cut away)
+  let keyCount = 0;
+  if (s.wallKeys && hasSpigot) {
+    const jobs = [];
+    if (g.centreHole?.wallPockets) jobs.push([g.centreHole.wallPockets, "spigot", rs, tol.spigot]);
+    if (hasCollar && g.raisedSpigot?.wallPockets) jobs.push([g.raisedSpigot.wallPockets, "collar", rci, tol.collar]);
+    for (const [pk, kind, wallR, tl] of jobs) {
+      const r = addWallKeys(body, pk, kind, wallR, tl, depth, warnings);
+      body = r.body;
+      keyCount += r.n;
+    }
+  }
 
   // Cutters for chamfered hole edges
   const coneAway = (r, zFace, x, y) =>
@@ -193,25 +242,25 @@ export function buildToolStart(flange, userSettings = {}) {
   for (const deg of angles) {
     const a = (deg * Math.PI) / 180;
     const x = pcdR * Math.cos(a), y = pcdR * Math.sin(a);
-    body = body.cut(cyl(holeD, -1, t + 1, x, y));
+    body = cutBy(body, cyl(holeD, -1, t + 1, x, y));
     if (s.headSeat === "counterbore") {
-      body = body.cut(cyl(headD, t - seat.length, t + 1, x, y));
+      body = cutBy(body, cyl(headD, t - seat.length, t + 1, x, y));
       if (chAway) {
-        body = body.cut(coneAway(headD / 2, t, x, y));
-        body = body.cut(coneAway(holeD / 2, t - seat.length, x, y));
+        body = cutBy(body, coneAway(headD / 2, t, x, y));
+        body = cutBy(body, coneAway(holeD / 2, t - seat.length, x, y));
         chamferCuts.push(headD / 2, holeD / 2);
       }
     } else if (s.headSeat === "countersink") {
       const cone = revolveProfile([
         [0, t - seat.length], [holeD / 2, t - seat.length], [headD / 2, t], [headD / 2, t + 1], [0, t + 1],
       ]).translate([x, y, 0]);
-      body = body.cut(cone);
+      body = cutBy(body, cone);
     } else if (chAway) {
-      body = body.cut(coneAway(holeD / 2, t, x, y));
+      body = cutBy(body, coneAway(holeD / 2, t, x, y));
       chamferCuts.push(holeD / 2);
     }
     if (chRobot) {
-      body = body.cut(coneRobot(holeD / 2, x, y));
+      body = cutBy(body, coneRobot(holeD / 2, x, y));
       chamferCuts.push(holeD / 2);
     }
   }
@@ -222,9 +271,9 @@ export function buildToolStart(flange, userSettings = {}) {
   if (!hasPin) {
     pinLength = 0;
   } else if (s.dowelMode === "hole") {
-    body = body.cut(cyl(dowelD, -1, t + 1, pcdR, 0));
-    if (chAway) { body = body.cut(coneAway(dowelD / 2, t, pcdR, 0)); chamferCuts.push(dowelD / 2); }
-    if (chRobot) { body = body.cut(coneRobot(dowelD / 2, pcdR, 0)); chamferCuts.push(dowelD / 2); }
+    body = cutBy(body, cyl(dowelD, -1, t + 1, pcdR, 0));
+    if (chAway) { body = cutBy(body, coneAway(dowelD / 2, t, pcdR, 0)); chamferCuts.push(dowelD / 2); }
+    if (chRobot) { body = cutBy(body, coneRobot(dowelD / 2, pcdR, 0)); chamferCuts.push(dowelD / 2); }
   } else {
     const pinDepth = hasSpigot ? depth : baseDepth;
     pinLength = Math.min(pinDepth - tol.dowelPin, g.locatingPin.depth - tol.dowelPin);
@@ -232,7 +281,7 @@ export function buildToolStart(flange, userSettings = {}) {
     const pinPts = chRobot
       ? [[0, -pinLength], [pr - c, -pinLength], [pr, -pinLength + c], [pr, t / 2], [0, t / 2]]
       : [[0, -pinLength], [pr, -pinLength], [pr, t / 2], [0, t / 2]];
-    body = body.fuse(revolveProfile(pinPts).translate([pcdR, 0, 0]));
+    body = fuseWith(body, revolveProfile(pinPts).translate([pcdR, 0, 0]));
     warnings.push("Printed pin is not recommended: weaker and less accurate than a metal dowel.");
   }
 
@@ -243,7 +292,8 @@ export function buildToolStart(flange, userSettings = {}) {
     errors,
     dims: { plateOuter, plateThickness: t, holeD, headD, seat, spigotOuter: hasSpigot ? spigotOuter : null,
             bore: hasSpigot ? bore : null, hasPin, collarInner: hasCollar ? collarInner : null,
-            collarOuter: hasCollar ? collarOuter : null, depth: hasSpigot ? depth : null, pinLength, centreHole: hasSpigot ? null : (g.centreHole?.diameter ?? 0),
-            dowelD, profile, chamferCuts, chamfer: { robot: chRobot, away: chAway, size: c } },
+            collarOuter: hasCollar ? collarOuter : null, depth: hasSpigot ? depth : null, pinLength, centreHole: hasSpigot ? null : 2 * rb,
+            dowelD, keyCount, profile, chamferCuts, chamfer: { robot: chRobot, away: chAway, size: c },
+            screws: { pcdR, angles, headH: head ? head.h : 0 } },
   };
 }

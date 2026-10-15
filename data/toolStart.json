@@ -173,15 +173,38 @@
   },
   "screwClearance": {
     "description": "Negative cylinder cut for the screw head (assumes socket head cap screws, ISO 4762). Opens on the face away from the robot.",
+    "headSource": "ISO 4762, plain head: dk max (head diameter) and k max (head height = nominal diameter). M18 is not in ISO 4762; its values are from DIN 912. M1 and M1.2 have no socket head cap screw standard, so they are not listed.",
     "headDiameterByScrew": {
+      "M1.6": 3,
+      "M2": 3.8,
+      "M2.5": 4.5,
       "M3": 5.5,
       "M4": 7,
-      "M5": 8.5
+      "M5": 8.5,
+      "M6": 10,
+      "M8": 13,
+      "M10": 16,
+      "M12": 18,
+      "M14": 21,
+      "M16": 24,
+      "M18": 27,
+      "M20": 30
     },
     "headHeightByScrew": {
+      "M1.6": 1.6,
+      "M2": 2,
+      "M2.5": 2.5,
       "M3": 3,
       "M4": 4,
-      "M5": 5
+      "M5": 5,
+      "M6": 6,
+      "M8": 8,
+      "M10": 10,
+      "M12": 12,
+      "M14": 14,
+      "M16": 16,
+      "M18": 18,
+      "M20": 20
     },
     "headDiameterMargin": 0.25,
     "diameter": {
@@ -254,16 +277,29 @@
     "options": [
       {
         "id": "holed",
-        "label": "Holed (bore = spigot - 2 x thickness)"
+        "label": "Holed"
       },
       {
         "id": "full",
         "label": "Full (solid)"
       }
     ],
-    "usedIn": [
+        "usedIn": [
+      "plate",
       "plate-spigot",
       "plate-spigot-collar"
     ]
-  }
+  },
+  "wallKeys": {
+    "description": "Some flanges have pockets cut into a wall (wallPockets in flanges.json). When on, the tool start gets one key per pocket so it locks into them.",
+    "default": true,
+    "spigotKeys": "Pockets in the flange centre hole wall: a key sticks out of the spigot wall. Plate + Spigot and Plate + Spigot + Collar.",
+    "collarKeys": "Pockets in the flange raised spigot wall: a key sticks inward from the collar wall. Plate + Spigot + Collar only.",
+    "keyDiameter": "pocket diameter - 2 x tolerance of the wall that touches it (spigot tolerance for spigot keys, collar tolerance for collar keys)",
+    "keyLength": "min(shared depth, pocket depth - that tolerance), so the key ends on the same plane as the spigot or collar",
+    "direction": "Angles are measured from the pin hole, seen from the tool side. 'clockwise' or 'counterclockwise' is set per flange in flanges.json.",
+    "chamfer": "Keys are not chamfered."
+  },
+  "viewMesh": {"toleranceMm": 0.03, "angleDeg": 8.6, "note": "Mesh of the robot side in the 3D view (not the export). Smaller = smoother, slower."},
+  "rebuildDelayMs": 250
 }

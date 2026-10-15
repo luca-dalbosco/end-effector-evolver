@@ -1,41 +1,75 @@
-import { zipSync, strToU8 } from "fflate";
-import { exportSTEP } from "replicad";
+import { exportSTEP, importSTEP } from "replicad";
 import wasmUrl from "replicad-opencascadejs/wasm?url";
-import { initKernel, buildToolStart } from "./toolStart.js";
+import { initKernel, buildToolStart } from "./toolStart/cad.js";
+import { replyTo, meshBufs } from "./rpc.js";
+import { stlBytes, threeMF, stlZip, placeSteps } from "./geom/export.js";
+import ts from "../data/toolStart.json";
+import te from "../data/toolEnd.json";
 
 const ready = initKernel({ locateFile: () => wasmUrl });
 let last = null;
+const shapes = new Map(); // tool-end part id → its B-rep, kept so Export can place it and write it
 
-function threeMF(v, tr) {
-  const verts = []; for (let i = 0; i < v.length; i += 3) verts.push(`<vertex x="${v[i]}" y="${v[i+1]}" z="${v[i+2]}"/>`);
-  const tris = []; for (let i = 0; i < tr.length; i += 3) tris.push(`<triangle v1="${tr[i]}" v2="${tr[i+1]}" v3="${tr[i+2]}"/>`);
-  const model = `<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources><object id="1" type="model"><mesh><vertices>${verts.join("")}</vertices><triangles>${tris.join("")}</triangles></mesh></object></resources><build><item objectid="1"/></build></model>`;
-  return zipSync({
-    "[Content_Types].xml": strToU8(`<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>`),
-    "_rels/.rels": strToU8(`<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>`),
-    "3D/3dmodel.model": strToU8(model),
-  });
+const ab = (u) => u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength);
+function place(s, p) { // same pose as the 3D view (see placeSteps)
+  let r = s.clone(); for (const [deg, ax] of placeSteps(p.rot)) r = r.rotate(deg, [0, 0, 0], ax); // each step replaces the shape, as in a chain
+  return r.translate(p.pos);
+}
+async function exportScene(m) {
+  const own = []; // copies made here, freed afterwards
+  try {
+    const parts = m.items.map((it) => {
+      if (it.src === "mesh") return { name: it.name, p: it.p, i: it.i };
+      const base = it.src === "start" ? last : shapes.get(it.sid);
+      if (!base) throw new Error(`"${it.name}" is not in the geometry engine. Rebuild the robot side or add the part again.`);
+      const s = it.src === "part" ? place(base, it) : base;
+      if (s !== base) own.push(s);
+      return { name: it.name, shape: s };
+    });
+    let data, ext = m.format, tris = 0;
+    if (m.format === "step") {
+      if (parts.some((p) => !p.shape)) throw new Error("The connector is a mesh and cannot be written as STEP. Use STL or 3MF.");
+      data = await exportSTEP(parts.map((p) => ({ shape: p.shape, name: p.name })), { unit: "MM", modelUnit: "MM" }).arrayBuffer();
+    } else {
+      const ms = parts.map((p) => { if (!p.shape) return p; const me = p.shape.mesh({ tolerance: m.tol, angularTolerance: m.ang }); return { name: p.name, p: me.vertices, i: me.triangles }; });
+      tris = ms.reduce((n, o) => n + o.i.length / 3, 0);
+      if (m.format === "3mf") data = ab(threeMF(ms));
+      else if (ms.length === 1) data = ab(stlBytes(ms[0].p, ms[0].i));
+      else { data = ab(stlZip(ms)); ext = "zip"; }
+    }
+    const file = ext === "zip" ? `${m.base}_stl.zip` : `${m.base}.${ext}`;
+    replyTo(m, { ok: true, file, data, info: { objects: parts.length, tris, bytes: data.byteLength } }, [data]);
+  } catch (err) { replyTo(m, { ok: false, error: String(err?.message ?? err) }); }
+  finally { own.forEach((s) => s.delete?.()); }
+}
+
+// view mesh of a B-rep, with plain typed arrays the main thread can take over
+const viewMesh = (s, q) => { const me = s.mesh({ tolerance: q.toleranceMm, angularTolerance: (q.angleDeg * Math.PI) / 180 });
+  return { me, mesh: { p: Float32Array.from(me.vertices), n: Float32Array.from(me.normals), i: Uint32Array.from(me.triangles) } }; };
+
+const handlers = {
+  async import(m) { return addPart(m, await importSTEP(new Blob([m.data]))); },
+  async primitive(m) { const { buildPrimitive } = await import("./primitives.js"); return addPart(m, buildPrimitive(m.kind, m.size)); },
+  drop(m) { shapes.get(m.sid)?.delete?.(); shapes.delete(m.sid); },
+  exportScene,
+  build(m) {
+    const r = buildToolStart(m.flange, m.settings);
+    if (!r.ok) return replyTo(m, { ok: false, errors: r.errors, warnings: r.warnings });
+    last?.delete?.(); last = r.shape; // the old robot side is freed (OpenCascade memory is not garbage collected)
+    const { mesh } = viewMesh(last, ts.viewMesh), d = r.dims;
+    replyTo(m, { ok: true, warnings: r.warnings, mesh,
+      dims: { plateOuter: d.plateOuter, holeD: d.holeD, headD: d.headD, seatLength: d.seat.length, bore: d.bore, depth: d.depth, collarOuter: d.collarOuter,
+              thickness: d.plateThickness, spigotOuter: d.spigotOuter, centreHole: d.centreHole, screws: d.screws, pinHole: d.hasPin && d.pinLength === null, dowelD: d.dowelD } }, meshBufs(mesh));
+  },
+};
+function addPart(m, s) { // a tool-end part: keep its B-rep under its id, send the view mesh and the face ranges
+  const { me, mesh } = viewMesh(s, te.viewMesh);
+  shapes.get(m.sid)?.delete?.(); shapes.set(m.sid, s);
+  replyTo(m, { ok: true, name: m.name, kind: m.kind, sid: m.sid, fg: me.faceGroups, mesh }, meshBufs(mesh));
 }
 
 onmessage = async (e) => {
-  const m = e.data;
-  try {
-    await ready;
-    if (m.type === "build") {
-      const r = buildToolStart(m.flange, m.settings);
-      if (!r.ok) return postMessage({ id: m.id, ok: false, errors: r.errors, warnings: r.warnings });
-      last = r.shape;
-      const me = last.mesh({ tolerance: 0.03, angularTolerance: 0.15 });
-      const d = r.dims;
-      postMessage({ id: m.id, ok: true, warnings: r.warnings,
-        dims: { plateOuter: d.plateOuter, holeD: d.holeD, headD: d.headD, seatLength: d.seat.length, bore: d.bore, depth: d.depth, collarOuter: d.collarOuter },
-        mesh: { v: Float32Array.from(me.vertices), n: Float32Array.from(me.normals), t: Uint32Array.from(me.triangles) } });
-    } else if (m.type === "export" && last) {
-      let data;
-      if (m.format === "step") data = await exportSTEP([{ shape: last, name: "tool_start" }], { unit: "MM", modelUnit: "MM" }).arrayBuffer();
-      else if (m.format === "stl") data = await last.blobSTL({ tolerance: 0.01, angularTolerance: 0.1 }).arrayBuffer();
-      else { const me = last.mesh({ tolerance: 0.01, angularTolerance: 0.1 }); data = threeMF(me.vertices, me.triangles).buffer; }
-      postMessage({ id: m.id, exported: true, format: m.format, data }, [data]);
-    }
-  } catch (err) { postMessage({ id: m.id, ok: false, errors: [String(err)], warnings: [] }); }
+  const m = e.data, h = handlers[m.type]; if (!h) return;
+  try { await ready; await h(m); }
+  catch (err) { replyTo(m, { ok: false, error: String(err?.message ?? err), errors: [String(err?.message ?? err)], warnings: [] }); }
 };
