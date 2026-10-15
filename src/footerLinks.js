@@ -60,7 +60,7 @@ const PAGES = {
     html: `<p><strong>End Effector Evolver</strong><br>
       Copyright © 2026 Luca Dalbosco and contributors</p>
       <p>This is free software, released under the
-      <strong>GNU General Public License v3.0</strong>.</p>
+      <strong>GNU General Public License v3.0 or later</strong>.</p>
       <p><strong>You can:</strong> use it for any purpose, study how it works,
       change it, and share it.</p>
       <p><strong>You must:</strong> keep the copyright notice and this licence,
