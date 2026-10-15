@@ -277,7 +277,7 @@
     "options": [
       {
         "id": "holed",
-        "label": "Holed (bore = spigot - 2 x thickness)"
+        "label": "Holed"
       },
       {
         "id": "full",
@@ -285,6 +285,7 @@
       }
     ],
         "usedIn": [
+      "plate",
       "plate-spigot",
       "plate-spigot-collar"
     ]

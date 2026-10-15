@@ -1,7 +1,7 @@
 {
   "advanced": "Advanced mode lets you type any value, also outside the normal range, and shows extra settings. Each stage remembers its own on/off.",
   "fitMode": "How the plate meets the robot flange. Plate: flat plate only (easiest to print, weaker centring). Plate + Spigot: adds a short tube that goes into the flange centre hole. Plate + Spigot + Collar: also a collar around the flange raised spigot. Options your flange cannot take are greyed out.",
-  "spigot": "Holed: the spigot is a tube (lighter, uses less plastic). Full: a solid cylinder (stiffer).",
+  "spigot": "Holed: the spigot is a tube, bore = spigot - 2 x thickness (lighter, uses less plastic). Full: a solid cylinder (stiffer). In Plate mode there is no spigot: Holed keeps a hole over the flange centre hole, Full closes the plate.",
   "dowel": "The dowel stops the plate from rotating on the flange. Hole: a hole for a metal dowel pin (best). Printed pin: a pin printed with the part (weaker and less accurate).",
   "wallKeys": "Some flanges have small pockets in a wall. With this on, the plate gets matching keys that lock into them.",
   "thickness": "Wall and plate thickness in mm, used for the plate, the spigot wall and the collar wall. Green = recommended range.",

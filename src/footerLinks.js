@@ -1,5 +1,6 @@
 // Footer links (bottom-right). Edit the text and URLs in the two blocks below.
 import { TUTORIAL_STEPS } from './tutorialSteps.js';
+import { store } from './store.js';
 
 const LINKS = {
   donate: 'https://ko-fi.com/lucad33107',
@@ -35,15 +36,14 @@ const LIBS = [
 const WELCOME = {
   video: '', // <- put the intro video URL here (empty = shows "coming soon")
   intro: `<p><strong>End Effector Evolver</strong> (EEEvolver)<br>
-    <small>Designed by Luca Dalbosco · coded with Claude, Anthropic's AI assistant</small></p>
+    <small>Designed by Luca Dalbosco · co-coded with Claude</small></p>
     <p>This tool builds a 3D-printable connector between your robot's flange and the part it will carry, such as a gripper or an actuator.
     Pick your robot, bring in your part, choose where the connector may attach and what it must avoid, then generate it.
     <strong>Bridge</strong> gives an instant solid wrap; <strong>Voxel</strong> grows a lighter, optimised structure.
     Export as STL or 3MF and print.</p>
-    <p>Everything runs in your browser. Nothing is uploaded.</p>
-    <p><small><strong>Disclaimer:</strong> experimental software, provided as is with no warranty. Generated parts are not engineered,
-    certified or load-rated. Check every dimension against the manufacturer datasheet, test at low load and speed first,
-    and use it on a real robot at your own risk.</small></p>`,
+    <p>Everything runs in your browser. Nothing is uploaded.</p>`,
+  // shown under the intro video
+  disclaimer: `<p><small><strong>Disclaimer:</strong> experimental, no warranty, parts not load-rated. Check dimensions and test at low load first. Use at your own risk.</small></p>`,
 };
 const WELCOME_KEY = 'welcomeHide'; // localStorage: '1' = do not open on start
 
@@ -222,13 +222,13 @@ export function initFooterLinks() {
   dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
 
   // Welcome pop-up: page 0 = welcome + video, pages 1-6 = the tutorial steps with a diagram. "Don't show again" is ticked by default (first visit only).
-  const store = (v) => { try { v === undefined ? null : localStorage.setItem(WELCOME_KEY, v); return localStorage.getItem(WELCOME_KEY); } catch (e) { return null; } };
+  const hidden = (v) => { if (v !== undefined) store.set(WELCOME_KEY, v); return store.get(WELCOME_KEY); };
   const N = TUTORIAL_STEPS.length;
   function openWelcome(page = 0) {
     const first = page === 0, last = page === N;
     const st = TUTORIAL_STEPS[page - 1];
     const body = first
-      ? `<h2>Welcome</h2>${WELCOME.intro}<p>${WELCOME.video ? `<a href="${WELCOME.video}" target="_blank" rel="noopener">▶ Watch the intro video</a>` : '▶ Intro video: coming soon.'}</p>`
+      ? `<h2>Welcome</h2>${WELCOME.intro}<p>${WELCOME.video ? `<a href="${WELCOME.video}" target="_blank" rel="noopener">▶ Watch the intro video</a>` : '▶ Intro video: coming soon.'}</p>${WELCOME.disclaimer}`
       : `<h2>${page} · ${st.title}</h2>${st.html}${st.strip}<p>${st.text}</p>`;
     const dots = TUTORIAL_STEPS.map((x, i) => `<a class="tv-pill${i + 1 === page ? ' on' : ''}" data-p="${i + 1}">${i + 1} ${x.pill}</a>`).join('');
     dialog.innerHTML = `${body}<div class="tv-pills">${dots}</div><div class="wel-foot"><label><input type="checkbox" id="wel-hide"> Don't show again</label>${first ? '<button id="wel-skip">Skip</button>' : '<button id="wel-back">Back</button>'}<button id="wel-next">${last ? 'Done' : 'Next →'}</button></div>`;
@@ -242,7 +242,7 @@ export function initFooterLinks() {
     dialog.dataset.welcome = '1';
     if (!dialog.open) dialog.showModal();
   }
-  dialog.addEventListener('close', () => { if (dialog.dataset.welcome) store(openWelcome.hide === false ? '0' : '1'); dialog.dataset.welcome = ''; openWelcome.hide = undefined; }); // Esc and backdrop count too
+  dialog.addEventListener('close', () => { if (dialog.dataset.welcome) hidden(openWelcome.hide === false ? '0' : '1'); dialog.dataset.welcome = ''; openWelcome.hide = undefined; }); // Esc and backdrop count too
 
   const nav = document.createElement('nav');
   nav.className = 'footer-links';
@@ -266,5 +266,5 @@ export function initFooterLinks() {
     nav.appendChild(a);
   }
   document.body.appendChild(nav);
-  if (store() !== '1') openWelcome(0); // first visit
+  if (hidden() !== '1') openWelcome(0); // first visit
 }

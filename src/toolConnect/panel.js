@@ -9,7 +9,7 @@ export function initPanel(C, host) {
   const { S } = C, ui = (C.ui = {});
   const small = "font-size:12px;line-height:1.5;margin-top:4px";
   const meth = segmented([{ id: "bridge", label: "Bridge" }, { id: "optimize", label: "Voxel" }], (id) => {
-    S.method = id; C.refined = false; ui.refOut.textContent = ""; C.clearCoarseGhost(); C.clearPrev(); C.clearResult(); C.lastStats = null; C.setInfo("", ""); C.sync(); C.run();
+    S.method = id; ui.refOut.textContent = ""; C.clearCoarseGhost(); C.clearPrev(); C.clearResult(); C.lastStats = null; C.setInfo("", ""); C.sync(); C.run();
   });
   host.append(meth.el);
 
@@ -94,7 +94,7 @@ export function initPanel(C, host) {
   C.refreshers.push(() => {
     meth.set(S.method); optA.style.display = optB.style.display = S.method === "optimize" ? "" : "none"; brG.style.display = S.method === "bridge" ? "" : "none";
     const at = S.method === "bridge" ? ui.brOut : ui.refOut; if (ui.sumOut.previousSibling !== at) at.after(ui.sumOut); // weight readout under the active method's result
-    bSmooth.disabled = bCut.disabled = bUnsmooth.disabled = C.running || !C.canClear || C.workerLevel !== S.ref;
+    bSmooth.disabled = bCut.disabled = bUnsmooth.disabled = C.busy() || !C.canClear || C.workerLevel !== S.ref;
     const o = tc.smooth.strength.options.find((x) => x.passes === S.sp); if (o) smSel.value = o.id;
     selfBox.style.display = C.advanced ? "" : "none";
   });

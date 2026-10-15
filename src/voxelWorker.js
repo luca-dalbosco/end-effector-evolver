@@ -246,7 +246,9 @@ async function runRefine(m) {
   if (state.h > base.h * 0.99) { state = base; throw new Error(`The refined voxel (${r.stats.h.toFixed(2)} mm) cannot get finer than the analysis voxel (${base.h.toFixed(2)} mm). Raise the refine voxel budget or reduce the design space.`); }
   state.parent = base; state.input = base.input;
   replyTo(m, { refineInfo: true, stats: r.stats, hc: base.h }, [], true);
-  const S = state; await runOptimize({ ...m, refine: true });
+  const S = state;
+  try { await runOptimize({ ...m, refine: true }); }
+  catch (err) { state = base; throw err; } // a failed refine leaves the worker on the Draft, as the panel shows it
   if (m.level) levels[m.level] = S; // kept, so you can switch back to this level and smooth it
 }
 
