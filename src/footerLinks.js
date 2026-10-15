@@ -34,8 +34,16 @@ const LIBS = [
 // Welcome pop-up (first visit, and the footer "Tutorial" link). Edit the texts here.
 const WELCOME = {
   video: '', // <- put the intro video URL here (empty = shows "coming soon")
-  intro: `<p>Welcome! This tool builds a 3D-printable connector between your robot flange and your own part.</p>
-    <p>Everything runs in your browser. Nothing is uploaded.</p>`,
+  intro: `<p><strong>End Effector Evolver</strong> (EEEvolver)<br>
+    <small>Designed by Luca Dalbosco · coded with Claude, Anthropic's AI assistant</small></p>
+    <p>This tool builds a 3D-printable connector between your robot's flange and the part it will carry, such as a gripper or an actuator.
+    Pick your robot, bring in your part, choose where the connector may attach and what it must avoid, then generate it.
+    <strong>Bridge</strong> gives an instant solid wrap; <strong>Voxel</strong> grows a lighter, optimised structure.
+    Export as STL or 3MF and print.</p>
+    <p>Everything runs in your browser. Nothing is uploaded.</p>
+    <p><small><strong>Disclaimer:</strong> experimental software, provided as is with no warranty. Generated parts are not engineered,
+    certified or load-rated. Check every dimension against the manufacturer datasheet, test at low load and speed first,
+    and use it on a real robot at your own risk.</small></p>`,
 };
 const WELCOME_KEY = 'welcomeHide'; // localStorage: '1' = do not open on start
 
@@ -165,11 +173,15 @@ dialog.footer-dialog[data-welcome="1"]{max-width:560px}
 @keyframes tv-drop{from{transform:translateY(-28px);opacity:0}to{transform:none;opacity:1}}
 @keyframes tv-slide{from{transform:translateX(60px);opacity:0}to{transform:none;opacity:1}}
 @keyframes tv-pop{from{transform:scale(.6);opacity:0}to{transform:none;opacity:1}}
+.tv-arm1{animation:tv-arm1 2.6s ease-in-out infinite alternate}.tv-arm2{animation:tv-arm2 1.9s ease-in-out infinite alternate}
+@keyframes tv-arm1{from{transform:rotate(-12deg)}to{transform:rotate(10deg)}}
+@keyframes tv-arm2{from{transform:rotate(14deg)}to{transform:rotate(-16deg)}}
 @keyframes tv-pulse{50%{opacity:.35}}
 @keyframes tv-draw{to{stroke-dashoffset:0}}
 @media (prefers-reduced-motion:reduce){.tv-scene svg *{animation:none!important}}
 dialog.footer-dialog .wel-foot{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12px}
-dialog.footer-dialog .wel-foot label{margin-right:auto}
+dialog.footer-dialog .wel-foot label{margin-right:auto;display:flex;align-items:center;gap:6px;white-space:nowrap}
+dialog.footer-dialog .wel-foot input{width:auto;flex:none;margin:0}
 dialog.footer-dialog .wel-foot button{margin:0}
 `;
 
@@ -184,7 +196,7 @@ export function initFooterLinks() {
   // click on the dark backdrop closes the pop-up
   dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
 
-  // Welcome pop-up: page 0 = welcome + video, pages 1-5 = the tutorial steps with a diagram. "Don't show again" is ticked by default (first visit only).
+  // Welcome pop-up: page 0 = welcome + video, pages 1-6 = the tutorial steps with a diagram. "Don't show again" is ticked by default (first visit only).
   const store = (v) => { try { v === undefined ? null : localStorage.setItem(WELCOME_KEY, v); return localStorage.getItem(WELCOME_KEY); } catch (e) { return null; } };
   const N = TUTORIAL_STEPS.length;
   function openWelcome(page = 0) {
