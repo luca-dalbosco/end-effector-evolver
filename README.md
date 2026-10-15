@@ -23,4 +23,4 @@ Work in progress. Not released yet.
 Settings and flange data live in `data/*.json`.
 
 ## Licence
-GNU GPL v3.0 (see `LICENSE`). Third-party licences are in `third-party-licenses/`.
+GNU GPL v3.0 or later (see `LICENSE`). Third-party licences are in `third-party-licenses/`.
