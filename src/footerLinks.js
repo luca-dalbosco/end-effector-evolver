@@ -2,9 +2,9 @@
 import { TUTORIAL_STEPS } from './tutorialSteps.js';
 
 const LINKS = {
-  donate: 'https://www.buymeacoffee.com/YOUR-NAME',      // <- put your real link
+  donate: 'https://ko-fi.com/lucad33107',
   source: 'https://github.com/luca-dalbosco/end-effector-evolver',      // <- repo link
-  contact: 'mailto:YOUR-EMAIL@example.com',              // <- or a form URL later
+  contact: 'https://github.com/luca-dalbosco/end-effector-evolver/issues',
 };
 
 // Third-party libraries (from npm). Edit freely.
@@ -51,9 +51,32 @@ const WELCOME_KEY = 'welcomeHide'; // localStorage: '1' = do not open on start
 const PAGES = {
   about: {
     title: 'About',
-    html: `<p>End Effector Evolver creates a 3D-printable connector
-      between a robot flange and your own part.</p>
-      <p>Everything runs in your browser. Nothing is uploaded.</p>`,
+    html: `<p><strong>End Effector Evolver</strong> (EEEvolver)<br>
+      <small>A free, open-source tool for robot end effectors.</small></p>
+      <p><strong>What it does</strong><br>
+      It builds a 3D-printable connector between a robot flange and your own part,
+      such as a gripper, a sensor or an actuator.</p>
+      <p><strong>How it works</strong></p>
+      <ol>
+        <li><strong>Robot side:</strong> pick your robot and flange.</li>
+        <li><strong>Tool:</strong> bring in your part and position it.</li>
+        <li><strong>Preparation:</strong> mark where the connector may attach and what it must avoid.</li>
+        <li><strong>Generation:</strong> <em>Bridge</em> gives an instant solid wrap,
+          <em>Voxel</em> grows a lighter, optimised structure.</li>
+        <li><strong>Export:</strong> save as STL or 3MF and print.</li>
+      </ol>
+      <p><strong>Private by design</strong><br>
+      Everything runs in your browser. Your files are never uploaded.</p>
+      <p><strong>Status</strong><br>
+      Experimental software, provided as is. Generated parts are not engineered or load-rated,
+      so check every dimension and test at low load first.
+      See also Licence, Credits and Privacy Notice.</p>
+      <p>
+        <a href="${LINKS.source}" target="_blank" rel="noopener">Source code (GitHub)</a><br>
+        <a href="${LINKS.contact}" target="_blank" rel="noopener">Questions, bugs and ideas</a><br>
+        <a href="${LINKS.donate}" target="_blank" rel="noopener">Support the project (Ko-fi)</a>
+      </p>
+      <p><small>Designed by Luca Dalbosco. Co-coded with Claude.</small></p>`,
   },
     licence: {
     title: 'Licence',
@@ -90,8 +113,10 @@ const PAGES = {
     html: `<p>This tool runs 100% in your browser. Your files and settings
       never leave your computer. We have no server, no accounts, no
       tracking and no cookies.</p>
-      <p>If you use the contact link, your email app sends the message,
-      and it is handled like any normal email.</p>`,
+      <p>The Contact link opens our GitHub Issues page. If you write there,
+      your message and GitHub username are public and handled by GitHub under
+      its own privacy policy. The Donate link opens Ko-fi, which has its own
+      privacy policy too.</p>`,
   },
   shortcuts: {
     title: 'Shortcuts',
