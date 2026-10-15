@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import tc from "../../data/toolConnect.json";
 import { loadVector } from "../geom/load.js";
+import { meshFrom } from "../viewer.js";
 
 export function initPreview(C) {
   const { S, scene, dom } = C;
@@ -10,11 +11,7 @@ export function initPreview(C) {
     coarse: glass(0x4a7fb5, 0.3), ghost: glass(0xff9800, 0.3) });
   C.prev = []; C.result = null; C.ghost = null; C.coarseGhost = null; let arrow = null;
 
-  C.meshOf = (x, mat) => {
-    const bg = new THREE.BufferGeometry();
-    bg.setAttribute("position", new THREE.BufferAttribute(x.p, 3)); bg.setAttribute("normal", new THREE.BufferAttribute(x.n, 3)); bg.setIndex(new THREE.BufferAttribute(x.i, 1));
-    const m = new THREE.Mesh(bg, mat); m.visible = C.active; scene.add(m); return m;
-  };
+  C.meshOf = (x, mat) => { const m = meshFrom(x, mat); m.visible = C.active; scene.add(m); return m; };
   const drop = (m) => { scene.remove(m); m.geometry.dispose(); };
   C.clearGhost = () => { if (C.ghost) { drop(C.ghost); C.ghost = null; } };
   C.clearPrev = () => { C.prev.forEach(drop); C.prev = []; C.clearGhost(); };
@@ -26,7 +23,7 @@ export function initPreview(C) {
   C.showResult = (d) => { C.clearResult(); C.result = C.meshOf(d, mats.res); };
   C.keep = (f) => { const v = C.vol, s = C.sag, o = C.over; f(); C.vol = v; C.sag = s; C.over = o; C.showSummary(); }; // showResult clears the readout
   C.setPrev = (d, s, a) => { // a new design space: everything after it starts again
-    C.resetLevels("⚠ The setup changed, so you start again at Draft."); C.refined = false; C.ui.refOut.textContent = "";
+    C.resetLevels("⚠ The setup changed, so you start again at Draft."); C.ui.refOut.textContent = "";
     C.clearCoarseGhost(); C.clearPrev(); C.clearResult();
     C.prev = [C.meshOf(d, mats.dom), C.meshOf(s, mats.src)]; if (a && a.i.length) C.prev.push(C.meshOf(a, mats.avoid));
   };
@@ -60,7 +57,7 @@ export function initPreview(C) {
 
   C.stageVisibility = (stage) => { // what the 3D view shows in each stage
     const on = stage === "C" || stage === "G";
-    C.clearanceVisible(on); legend.style.display = on ? "" : "none";
+    C.clearanceVisible(on); C.gapsVisible(stage === "C"); legend.style.display = on ? "" : "none";
     if (C.ghost) C.ghost.visible = on; if (arrow) arrow.visible = on && S.method === "optimize"; if (C.coarseGhost) C.coarseGhost.visible = on;
     C.prev.forEach((m) => (m.visible = on && !C.result)); if (C.result) C.result.visible = on || stage === "D"; // stage D (Export) shows the connector too
   };

@@ -17,7 +17,7 @@ export function initClearance(C, host) {
 
   C.keepOut = () => { // plate cylinder from the bottom of the tool start up to the top face; robot cylinder below it; bolt slots
     const st = getStart(); if (!st) return null;
-    const v = st.mesh.v; let zMin = Infinity; for (let i = 2; i < v.length; i += 3) zMin = Math.min(zMin, v[i]);
+    const v = st.mesh.p; let zMin = Infinity; for (let i = 2; i < v.length; i += 3) zMin = Math.min(zMin, v[i]);
     const R = st.dims.plateOuter / 2, sc = st.dims.screws, t = st.dims.thickness;
     const bolts = [];
     if (sc && sc.headH) {

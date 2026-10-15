@@ -3,6 +3,7 @@ import tc from "../../data/toolConnect.json";
 import { esc } from "../ui.js";
 import { rpc, serial } from "../rpc.js";
 import { solidCentroid } from "../geom/voxelize.js";
+import { store } from "../store.js";
 
 export function initRun(C) {
   const { S, list, getStart } = C, ui = C.ui;
@@ -15,13 +16,13 @@ export function initRun(C) {
 
   // time estimate = measured matrix speed × work × a factor; the factor is learned from the last finished run on this computer
   const calib = { gen: 1, ref: 1 };
-  try { Object.assign(calib, JSON.parse(localStorage.getItem("connCalib") || "{}")); } catch (e) { /* no storage */ }
-  const learn = (key, actualMs, predMs) => { if (!(predMs > 0)) return; calib[key] = Math.min(20, Math.max(0.2, actualMs / predMs)); try { localStorage.setItem("connCalib", JSON.stringify(calib)); } catch (e) { /* ignore */ } };
+  Object.assign(calib, store.json("connCalib", {}));
+  const learn = (key, actualMs, predMs) => { if (!(predMs > 0)) return; calib[key] = Math.min(20, Math.max(0.2, actualMs / predMs)); store.set("connCalib", JSON.stringify(calib)); };
   const refWork = (count, its) => count * (tc.estimate.cgIterationsPerStep * its + tc.solver.firstStep.maxCgIterations) * tc.refine.overheadFactor; // × secPerElem × 1000 = ms before learning
 
   C.setInfo = (cls, html) => { ui.info.className = cls; ui.info.innerHTML = html; };
-  C.setLock = (on) => {
-    C.running = on; C.panel.querySelectorAll("input,select,button").forEach((x) => (x.disabled = on));
+  C.setPhase = (p) => { // see C.phase in index.js
+    const on = p !== "idle"; C.phase = p; C.panel.querySelectorAll("input,select,button").forEach((x) => (x.disabled = on));
     ui.bStop.disabled = !on; if (!on) { ui.bGo.disabled = !C.lastStats; C.sync(); }
   };
   function showEstimate() {
@@ -62,17 +63,17 @@ export function initRun(C) {
       if (m.mesh) C.keep(() => C.showResult(m.mesh));
       return;
     }
-    C.setLock(false);
+    C.setPhase("idle");
     if (!m.ok) { bad(ui.refOut, m); if (C.coarseGhost && !C.result) { C.result = C.coarseGhost; C.result.material = C.mats.res; C.coarseGhost = null; } return; }
     if (!m.stopped && predRef && secPerElem != null) learn("ref", m.elapsed, refWork(predRef.count, m.it) * secPerElem * 1000);
-    C.showResult(m.mesh); C.canClear = true; C.refined = true; ui.rfBar.value = m.stopped ? ui.rfBar.value : 1; if (!m.stopped) C.storeGen(S.ref, m.mesh, m.stats, m.sag); C.sync();
+    C.showResult(m.mesh); C.canClear = true; ui.rfBar.value = m.stopped ? ui.rfBar.value : 1; if (!m.stopped) C.storeGen(S.ref, m.mesh, m.stats, m.sag); C.sync();
     const t = m.stats; C.vol = t.volCm3; C.over = t.overhang; C.sag = m.sag; C.showSummary();
     ui.refOut.innerHTML = `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔" : "⚠ The robot side and the tool are no longer connected."} Refine ${m.stopped ? "stopped" : "finished"} after ${m.it} steps in ${fmt(m.elapsed)}. Voxel ${m.h.toFixed(2)} mm (analysis was ${m.hc.toFixed(2)} mm).` + (C.advanced ? `<br>Stiffness: ${(m.c0 / m.c).toFixed(2)}× the coarse design. Material: ${((m.vol / m.cap) * 100).toFixed(0)}% of the coarse volume. ${t.islands.toLocaleString()} loose voxels dropped.` : "") + "</span>";
   }
   const onRestored = (level) => (m) => { // "restore": the worker holds this finished level again, so it can be smoothed
     if (!m.ok) return bad(ui.refOut, m);
     C.clearCoarseGhost(); C.showResult(m.mesh); C.sag = C.gens[level]?.sag ?? null; // the clearance below brings weight and overhangs back, the sag comes from the stored level
-    C.canClear = true; C.refined = level !== C.levels[0]; C.workerLevel = level; ui.refOut.innerHTML = `<span class="ok">${C.levelName(level)} design.</span>`; C.sync();
+    C.canClear = true; C.workerLevel = level; ui.refOut.innerHTML = `<span class="ok">${C.levelName(level)} design.</span>`; C.sync();
     applyClearance(); // reads the weight and overhangs again
   };
   const onBridge = (id) => (m) => {
@@ -94,12 +95,13 @@ export function initRun(C) {
     ui.smOut.innerHTML = m.reset ? `<span class="ok">Back to voxels.</span>`
       : `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔" : "⚠ The robot side and the tool are no longer connected."} ${op === "smoothClear" ? `Cut ${t.cut.toLocaleString()} cells in the zones. ` : ""}${t.islands ? `${t.islands.toLocaleString()} loose cells dropped. ` : ""}Volume ${t.volCm3.toFixed(1)} cm³, ${t.tris.toLocaleString()} triangles.</span>`;
   };
-  function onCleared(m) { // "clear": the Clearance step after a design (chain) or after going back to the Draft
-    if (!m.ok) { C.chain = false; C.setLock(false); return bad(ui.clrOut, m); }
+  function onCleared(m) { // "clear": the Clearance step right after a design (phase clearing) or after going back to the Draft
+    if (!m.ok) { C.setPhase("idle"); return bad(ui.clrOut, m); }
     const t = m.stats; C.keep(() => C.showResult(m.mesh)); C.canClear = true;
     C.vol = t.volCm3; C.over = t.overhang; C.showSummary();
     ui.clrOut.innerHTML = `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔ Cleared" : "⚠ The robot side and the tool are no longer connected"}: ${t.cut.toLocaleString()} voxels deleted in the zones, ${t.islands.toLocaleString()} loose voxels dropped.</span>`;
-    if (C.chain) { C.storeGen(C.levels[0], m.mesh, t, C.sag); C.chain = false; C.setLock(false); } else C.sync();
+    if (C.phase === "clearing") C.storeGen(C.levels[0], m.mesh, t, C.sag); // the Draft is finished
+    if (C.busy()) C.setPhase("idle"); else C.sync();
   }
   function onOptimize(m) { // "optimize": progress, then the result, then the Clearance step runs by itself
     if (m.progress) {
@@ -109,12 +111,12 @@ export function initRun(C) {
       if (m.mesh) C.showResult(m.mesh);
       return;
     }
-    if (!m.ok) { C.chain = false; C.setLock(false); C.prev.forEach((x) => (x.visible = C.active)); return bad(ui.prog, m); }
+    if (!m.ok) { C.setPhase("idle"); C.prev.forEach((x) => (x.visible = C.active)); return bad(ui.prog, m); }
     C.showResult(m.mesh); C.canClear = true; ui.bar.value = m.stopped ? ui.bar.value : 1; C.sag = m.sag;
     if (!m.stopped && secPerElem != null) learn("gen", m.elapsed, predGen * (m.it / S.iters) * secPerElem * 1000);
     ui.prog.innerHTML = `<span class="ok">Design ${m.stopped ? "stopped" : "finished"} after ${m.it} steps in ${fmt(m.elapsed)}.</span>`;
-    C.chain = !m.stopped; ui.clrOut.textContent = "Clearing…"; vw("clear", {}, onCleared); // the voxel result is always cleared; the lock is released after it
-    if (!C.chain) C.setLock(false);
+    if (m.stopped) C.setPhase("idle"); else C.phase = "clearing"; // a finished design stays locked until its clearance is back
+    ui.clrOut.textContent = "Clearing…"; vw("clear", {}, onCleared); // the voxel result is always cleared
   }
   const onDomain = (id) => (m) => {
     if (id !== reqId) return; // the setup changed since
@@ -125,16 +127,16 @@ export function initRun(C) {
   // ---------- requests ----------
   function ensureWorker() {
     if (!vw) {
-      vw = rpc(new Worker(new URL("../voxelWorker.js", import.meta.url), { type: "module" }));
+      vw = rpc(new Worker(new URL("../voxelWorker.js", import.meta.url), { type: "module" }), "design engine");
       sendDomain = serial(vw, "domain"); sendBridge = serial(vw, "bridge");
       vw("bench", {}, (m) => { secPerElem = m.secPerElem; showEstimate(); });
     }
     return vw;
   }
-  function ghostPreview() { if (vw && C.lastStats && !C.running) vw("clearPreview", {}, onPreview(++gid)); }
+  function ghostPreview() { if (vw && C.lastStats && !C.busy()) vw("clearPreview", {}, onPreview(++gid)); }
   function applyClearance() { if (!vw || !C.canClear) return; ui.clrOut.textContent = "Clearing…"; vw("clear", {}, onCleared); }
   C.restore = (level) => vw && (vw("restore", { level, draft: level === C.levels[0] }, onRestored(level)), true);
-  C.stop = () => { C.chain = false; vw?.("stop"); };
+  C.stop = () => { if (C.phase === "clearing") C.phase = "stopping"; vw?.("stop"); }; // a stopped Draft is not kept as a finished level
   C.selftest = () => { ui.selfOut.textContent = "Running…"; ensureWorker()("selftest", {}, onSelftest); };
   C.smooth = (type, data, text) => { if (!vw || !C.canClear) return; ui.smOut.textContent = text; vw(type, data, onSmoothed(++gid, type)); };
 
@@ -166,17 +168,17 @@ export function initRun(C) {
   };
   C.generate = () => { // Draft: design, then clearance
     if (!C.lastStats || !vw) return;
-    C.refined = false; ui.refOut.textContent = ""; C.clearCoarseGhost(); C.chain = false; C.reached = {}; C.gens = {}; C.workerLevel = null; C.levelWarn = "";
+    ui.refOut.textContent = ""; C.clearCoarseGhost(); C.reached = {}; C.gens = {}; C.workerLevel = null; C.levelWarn = "";
     predGen = C.lastStats.count * tc.estimate.cgIterationsPerStep * S.iters * tc.estimate.overheadFactor; // × secPerElem × 1000 = ms before learning
     C.clearResult(); C.prev.forEach((x) => (x.visible = false));
-    C.setLock(true); ui.bar.value = 0; ui.prog.textContent = "Starting… the first step is the slowest.";
+    C.setPhase("designing"); ui.bar.value = 0; ui.prog.textContent = "Starting… the first step is the slowest.";
     vw("optimize", { vf: S.vf, rmin: S.rmin, maxIter: S.iters, mass: S.mass, accel: S.accel, gdir: S.gdir, extra: [S.fx, S.fy, S.fz] }, onOptimize);
   };
   C.refine = () => { // Normal or Fine: Refine step on the Draft design
     if (!vw || !C.canRefine()) return;
     const d = (k) => tc.refine[k].default;
     if (C.result) { C.clearCoarseGhost(); C.coarseGhost = C.result; C.coarseGhost.material = C.mats.coarse; C.result = null; } // the coarse result stays visible as a transparent ghost
-    C.setLock(true); ui.rfBar.value = 0; ui.refOut.textContent = "Preparing the finer grid…";
+    C.setPhase("refining"); ui.rfBar.value = 0; ui.refOut.textContent = "Preparing the finer grid…";
     vw("refine", { level: S.ref, h: S.h, budget: d("voxelBudget"), maxCells: tc.maxGridCells, bandVoxels: d("bandVoxels"), rmin: S.rmin, maxIter: d("maxIterations"), mass: S.mass, accel: S.accel, gdir: S.gdir, extra: [S.fx, S.fy, S.fz], shrink: { tol: d("stiffnessTolerance"), step: d("shrinkStep"), minFrac: d("minVolumeFraction") } }, onRefine);
   };
 }

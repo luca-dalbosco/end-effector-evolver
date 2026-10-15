@@ -51,7 +51,7 @@ export function initExport({ geo, $, list, toolEnd, toolConnect, getStart, getFl
     const parts = list.items().filter((i) => i.sid != null); // tool-end parts and every other object the user added
     const role = (i) => (i.object === endObj ? " (tool)" : toolConnect.isAvoided(i) ? " (avoid)" : "");
     const part = (i, tag) => ({ name: i.name + (tag ? role(i) : ""), src: "part", sid: i.sid, pos: i.object.position.toArray(), rot: [i.object.rotation.x, i.object.rotation.y, i.object.rotation.z] });
-    const start = { name: "Robot side", src: "start" }, conn = res && { name: "Connector", src: "mesh", v: res.p, t: res.i };
+    const start = { name: "Robot side", src: "start" }, conn = res && { name: "Connector", src: "mesh", p: res.p, i: res.i };
     const items = [], notes = [];
     if (S.scope === "start") {
       if (!getStart()) return { error: "The robot side is not built yet." };

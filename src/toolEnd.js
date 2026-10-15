@@ -5,9 +5,10 @@ import { TransformControls } from "three/examples/jsm/controls/TransformControls
 import te from "../data/toolEnd.json";
 import { section, help, numberRow, segmented } from "./ui.js";
 import { record, isReplaying } from "./history.js";
+import { meshFrom, onViewClick } from "./viewer.js";
 
-export function initToolEnd({ scene, cam, renderer, orbit, geo, $, refreshers, list, view }) {
-  const refresh = () => refreshers.forEach((f) => f());
+export function initToolEnd({ scene, cam, renderer, orbit, geo, $, list, view }) {
+  const refreshers = [], refresh = () => refreshers.forEach((f) => f()); // this stage's rows only (a gizmo drag refreshes them on every move)
   const limit = te.maxFileSizeMB.default; // internal limit: edit it in data/toolEnd.json, not shown in the UI
   let part = null, partKind = null, cur = null, stage = "A", primKind = te.primitives[0].id, primSize = te.primitiveSize.default;
   const mine = []; // list entries that are tool-end parts (the flange is not in here)
@@ -16,18 +17,8 @@ export function initToolEnd({ scene, cam, renderer, orbit, geo, $, refreshers, l
   let dropUp = null; // position/rotation drop-up in the 3D view
 
   // ---------- panel (shown only in stage B) ----------
-  const stageA = ["controls", "msg", "exportA"].map($);
   const panel = document.createElement("div"); panel.style.display = "none"; $("exportA").after(panel);
-  const spans = document.querySelectorAll("#steps span[data-s]");
-  spans.forEach((s) => (s.onclick = () => showStage(s.dataset.s)));
-  function showStage(st) {
-    stage = st;
-    stageA.forEach((el) => (el.style.display = st === "A" ? "" : "none"));
-    panel.style.display = st === "B" ? "" : "none";
-    syncGizmo();
-    spans.forEach((s) => s.classList.toggle("on", s.dataset.s === st));
-    document.dispatchEvent(new CustomEvent("stage", { detail: st }));
-  }
+  document.addEventListener("stage", (e) => { stage = e.detail; panel.style.display = stage === "B" ? "" : "none"; syncGizmo(); });
   const add = section("Add objects"); panel.append(add.box); const body = add.body;
   const blk = (title) => { const d = document.createElement("div"); d.style.cssText = "margin:12px 0 0;padding-top:10px;border-top:1px solid var(--line)"; const h = document.createElement("div"); h.textContent = title; h.style.cssText = "font-weight:600;margin-bottom:6px"; d.append(h); body.append(d); return d; };
   const btn = (label, fn) => { const b = document.createElement("button"); b.textContent = label; b.onclick = fn; return b; };
@@ -65,14 +56,10 @@ export function initToolEnd({ scene, cam, renderer, orbit, geo, $, refreshers, l
   dom.addEventListener("pointermove", arbitrate, true); dom.addEventListener("pointerdown", arbitrate, true);
 
   // ---------- click an object in the 3D view (stage B) to select it ----------
-  const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(); let down = null;
-  dom.addEventListener("pointerdown", (e) => (down = [e.clientX, e.clientY]));
-  dom.addEventListener("pointerup", (e) => {
-    if (stage !== "B" || e.button !== 0 || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4 || gT.axis || gR.axis) return;
+  onViewClick(dom, cam, (e, ray) => {
+    if (stage !== "B" || e.button !== 0 || gT.axis || gR.axis) return;
     const targets = list.items().filter((i) => i.object.visible);
     const meshes = targets.map((i) => i.object.children.find((c) => c.userData.base)).filter(Boolean);
-    const r = dom.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
-    ray.setFromCamera(ndc, cam);
     const hit = ray.intersectObjects(meshes, false)[0]; if (!hit) return;
     const it = targets.find((i) => i.object.children.includes(hit.object)); if (it) list.select(it);
   });
@@ -95,9 +82,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, geo, $, refreshers, l
   list.onSelect(choose);
 
   function setPart(m, name, kind, sid) { // sid = id of the B-rep kept in the worker (Export uses it)
-    const bg = new THREE.BufferGeometry();
-    bg.setAttribute("position", new THREE.BufferAttribute(m.v, 3)); bg.setAttribute("normal", new THREE.BufferAttribute(m.n, 3)); bg.setIndex(new THREE.BufferAttribute(m.t, 1));
-    const mesh = new THREE.Mesh(bg, mat.clone()); mesh.userData.base = true; // "base" = the mesh the list makes transparent
+    const mesh = meshFrom(m, mat.clone()); mesh.userData.base = true; // "base" = the mesh the list makes transparent
     const grp = new THREE.Group(); grp.userData.fg = m.fg; grp.add(mesh);
     const it = list.add({ name, object: grp, onRemove: dropPart });
     it.kind = kind; it.size = kind ? primSize : null; it.sid = sid; mine.push(it); scene.add(grp);
