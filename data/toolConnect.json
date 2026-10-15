@@ -1,0 +1,97 @@
+{
+  "method": {
+    "default": "bridge",
+    "options": [
+      { "id": "bridge", "label": "Basic: Bridge (instant, solid)" },
+      { "id": "optimize", "label": "Advanced: Optimize (slow, light)" }
+    ]
+  },
+  "bridge": {
+    "waistPercent": { "min": 0, "max": 60, "step": 5, "default": 30, "recommendedRange": [10, 40], "note": "How much narrower the middle is than a straight wrap. 0 = straight wrap. With Print-ready on, it is lowered automatically so the walls never overhang more than 45°." },
+    "voxelSizeMm": { "min": 0.3, "max": 2, "step": 0.05, "default": 0.6, "recommendedRange": [0.4, 1], "note": "Grid used to draw the bridge surface. Smaller = smoother and more exact, but slower. Made coarser automatically on big parts." },
+    "circleSegments": 96,
+    "printCheckCells": 300000,
+    "printWaistSteps": 6
+  },
+  "voxelSize": { "min": 0.5, "note": "Smallest voxel the design space may use. The first pass voxel comes from the voxel budget; the Normal and Fine levels use Voxel target size." },
+  "designSpace": { "min": 0.05, "max": 0.75, "step": 0.05, "default": 0.25, "recommendedRange": [0.1, 0.4], "note": "How far the connector may wander from the straight path, as a fraction of the gap between the surfaces." },
+  "analysisVoxelBudget": { "min": 1000, "max": 200000, "step": 1000, "default": 6000, "recommendedRange": [3000, 40000], "note": "Maximum voxels in the design space. Fewer = much faster." },
+  "refinement": {
+    "default": "draft",
+    "draftVoxelMm": 1.5,
+    "note": "Draft = design + clearance on the first-pass voxel (about 1.5 mm). Normal and Fine refine the Draft on a finer voxel: Fine uses the voxel target size, Normal is halfway between Draft and the target. A level unlocks when the one before it has finished.",
+    "levels": [
+      { "id": "draft", "label": "Draft" },
+      { "id": "normal", "label": "Normal" },
+      { "id": "fine", "label": "Fine" }
+    ]
+  },
+  "voxelTarget": { "min": 0.5, "max": 1, "step": 0.05, "default": 1, "recommendedRange": [0.6, 1], "note": "Voxel size of the Fine level. Smaller = more detail, much slower. Normal is halfway between the Draft voxel and this size." },
+  "toolStartConnection": {
+    "default": "entire",
+    "options": [
+      { "id": "entire", "label": "Entire top surface" },
+      { "id": "partial", "label": "Partial (spigot area only)" }
+    ]
+  },
+  "volumeFraction": { "min": 0.05, "max": 0.6, "step": 0.01, "default": 0.25, "recommendedRange": [0.15, 0.4], "note": "Material amount: share of the design space that may be filled. Left = light, right = strong. The weight next to it is an estimate for the first pass." },
+  "printReady": { "default": false, "smoothMaxPower": 40, "smoothMinEps": 0.0001, "startDensity": 0.5, "note": "Print-ready (test): printed with the flange face on the bed. Nothing grows below the bed, and every voxel must rest on voxels below it (45° overhang at most), so there are no supports and no floating islands. Method: additive manufacturing filter (Langelaar 2017)." },
+  "material": { "label": "PLA", "densityGcm3": 1.24, "youngsModulusMPa": 2300, "note": "Used only for the weight and sag readout (solid, 100% infill). Printed parts are weaker across layers." },
+  "cantileverRatio": { "min": 0.7, "max": 1.05, "note": "Self-test: the solver's cantilever tip drop divided by beam theory must fall in this range." },
+  "arrowLengthMm": 60,
+  "filterRadius": { "min": 1.2, "max": 4, "step": 0.1, "default": 2, "recommendedRange": [1.5, 3], "note": "In voxels. Bigger = thicker, smoother members." },
+  "maxIterations": { "min": 10, "max": 300, "step": 10, "default": 40, "recommendedRange": [30, 100], "note": "The design stops earlier when it stops changing." },
+  "payloadMassKg": { "min": 0.1, "max": 100, "step": 0.1, "default": 2, "note": "Mass of the tool and what it carries." },
+  "accelFactor": { "min": 1, "max": 10, "step": 0.5, "default": 3, "recommendedRange": [2, 5], "note": "Multiplier for robot motion (1 = standing still)." },
+  "gravityDirection": { "default": "-Y", "options": ["-Z", "+Z", "-X", "+X", "-Y", "+Y"] },
+  "extraForceN": { "min": -1000, "max": 1000, "step": 1, "default": 0, "note": "Optional extra force at the centre of mass of the tool." },
+  "avoid": {
+    "faceExtrudeMm": { "min": 0, "max": 50, "step": 0.5, "default": 0, "recommendedRange": [0, 10], "note": "Gap: how far a red face is pushed outward. Nothing can grow inside this zone. 0 = only the face itself." },
+    "robotOffsetMm": { "min": 0, "max": 50, "step": 1, "default": 5, "recommendedRange": [3, 15], "note": "Keep-out cylinder below the robot side: plate diameter plus this offset on each side. Nothing grows inside it." },
+    "robotLengthMm": 100,
+    "objectGrowMm": { "min": 0, "max": 30, "step": 0.5, "default": 0, "recommendedRange": [0, 5], "note": "Gap: how far a red object is offset (grown evenly in all directions). 0 = only the object itself." }
+  },
+  "bolt": {
+    "lengthMarginMm": 0.25,
+    "shape": { "default": "slot", "options": [{ "id": "cylinder", "label": "Cylinder (above the head only)" }, { "id": "slot", "label": "Slot (runs outward from the flange centre)" }] },
+    "slotLengthMm": { "min": 0, "max": 200, "step": 1, "default": 25, "recommendedRange": [10, 50], "note": "How far the slot runs outward from each screw, away from the flange centre. Keeps inner screws reachable." },
+    "diameterMarginMm": 0.25,
+    "diameterAdjustMm": { "min": -1, "max": 10, "step": 0.25, "default": 0, "recommendedRange": [0, 2], "note": "Added to the head clearance diameter of the robot side (Allen head + 0.25)." },
+    "lengthAdjustMm": { "min": -1, "max": 50, "step": 0.25, "default": 0, "recommendedRange": [0, 5], "note": "Added to the head height + 0.25 of the robot side." }
+  },
+  "refine": {
+    "voxelBudget": { "min": 5000, "max": 200000, "step": 1000, "default": 40000, "note": "Maximum voxels in the refined grid. If it would be more, the refined voxel is made coarser automatically." },
+    "overheadFactor": 3,
+    "bandVoxels": { "min": 0.5, "max": 4, "step": 0.5, "default": 1.5, "note": "How far (in analysis voxels) the refined design may grow around the existing material." },
+    "maxIterations": { "min": 10, "max": 300, "step": 10, "default": 60, "note": "The refined design stops earlier when it stops changing." },
+    "stiffnessTolerance": { "min": 0, "max": 0.2, "step": 0.01, "default": 0.02, "note": "The refined design may lose this share of stiffness (compared with the coarse design) in exchange for less material." },
+    "shrinkStep": { "min": 0.01, "max": 0.2, "step": 0.01, "default": 0.03, "note": "Share of the material cap removed per shrink round." },
+    "minVolumeFraction": { "min": 0.2, "max": 1, "step": 0.05, "default": 0.6, "note": "The material may not drop below this share of the coarse volume." }
+  },
+  "smooth": {
+    "strength": {
+      "default": "medium",
+      "options": [
+        { "id": "light", "label": "Light", "passes": 1 },
+        { "id": "medium", "label": "Medium", "passes": 2 },
+        { "id": "strong", "label": "Strong", "passes": 4 }
+      ]
+    },
+    "passes": { "min": 1, "max": 10, "step": 1, "default": 2, "recommendedRange": [1, 4], "note": "Smoothing passes per click (each pass blurs the shape by about one voxel). More = rounder, but thin members get thinner. The volume is kept." }
+  },
+  "estimate": { "cgIterationsPerStep": 50, "overheadFactor": 1.5, "greenBelowMinutes": 5, "yellowBelowMinutes": 15 },
+  "maxGridCells": 3000000,
+  "rebuildDelayMs": 300,
+  "solver": {
+    "note": "Topology optimization (SIMP) and its stiffness solver. Change only with the solver self-test (Advanced mode, Run solver self-test).",
+    "penalty": 3,
+    "minStiffness": 0.001,
+    "moveLimit": 0.3,
+    "stopChange": 0.02,
+    "minSteps": 12,
+    "shrinkSettleSteps": 8,
+    "firstStep": { "tolerance": 0.0001, "maxCgIterations": 500 },
+    "laterSteps": { "tolerance": 0.001, "maxCgIterations": 60 },
+    "multigrid": { "enabled": true, "smoothingSteps": 1, "damping": 1.3, "powerSteps": 10, "directMaxDofs": 600, "maxLevels": 6, "note": "Multigrid preconditioner (Amir, Aage & Lazarov 2014): far fewer solver steps on big grids. damping = Jacobi factor × largest eigenvalue. enabled false = the old Jacobi preconditioner." }
+  }
+}
