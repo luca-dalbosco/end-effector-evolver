@@ -4,7 +4,7 @@
 // The screw access face is at z = t (away from the robot).
 import opencascade from "replicad-opencascadejs";
 import { setOC, draw, makeCylinder } from "replicad";
-import ts from "../data/toolStart.json";
+import ts from "../../data/toolStart.json";
 
 let ready = false;
 export async function initKernel(opts) {
@@ -184,7 +184,7 @@ export function buildToolStart(flange, userSettings = {}) {
 
   // Axisymmetric body in one revolve (no booleans). Corners flagged "ch" are convex corners
   // that receive a 45 degree chamfer (robot-facing or away-facing planar faces only).
-  const rb = (hasSpigot ? bore : g.centreHole?.diameter ?? 0) / 2;
+  const rb = (hasSpigot ? bore : full ? 0 : g.centreHole?.diameter ?? 0) / 2; // Plate + Full = closed plate
   const rs = spigotOuter / 2;
   const rp = plateOuter / 2;
   const rci = collarInner / 2, rco = collarOuter / 2;
@@ -292,7 +292,7 @@ export function buildToolStart(flange, userSettings = {}) {
     errors,
     dims: { plateOuter, plateThickness: t, holeD, headD, seat, spigotOuter: hasSpigot ? spigotOuter : null,
             bore: hasSpigot ? bore : null, hasPin, collarInner: hasCollar ? collarInner : null,
-            collarOuter: hasCollar ? collarOuter : null, depth: hasSpigot ? depth : null, pinLength, centreHole: hasSpigot ? null : (g.centreHole?.diameter ?? 0),
+            collarOuter: hasCollar ? collarOuter : null, depth: hasSpigot ? depth : null, pinLength, centreHole: hasSpigot ? null : 2 * rb,
             dowelD, keyCount, profile, chamferCuts, chamfer: { robot: chRobot, away: chAway, size: c },
             screws: { pcdR, angles, headH: head ? head.h : 0 } },
   };

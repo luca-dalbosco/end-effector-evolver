@@ -49,6 +49,6 @@ export function initLevels(C, host) {
     hint.textContent = C.levelWarn || (todo < 0 ? "↳ All levels done. Click a level to switch between the results." : todo < levels.length - 1 ? `↳ Finish ${name(levels[todo])} to unlock ${name(levels[todo + 1])}.` : `↳ ${name(levels[todo - 1])} is done: ${name(levels[todo])} is unlocked.`);
     const lv = S.ref, ok = lv === first ? !!C.lastStats : !!(C.lastStats && C.reached[levels[levels.indexOf(lv) - 1]] && C.canClear && C.canRefine());
     C.ui.bGo.textContent = lv === first ? "Generate Draft" : (C.gens[lv] ? "Re-run " : "Refine to ") + name(lv);
-    if (!C.running) C.ui.bGo.disabled = !ok;
+    if (!C.busy()) C.ui.bGo.disabled = !ok;
   });
 }
