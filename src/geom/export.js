@@ -21,6 +21,18 @@ export function stlBytes(p, t) {
   return new Uint8Array(dv.buffer);
 }
 
+// Merges vertices that sit at the same place (to the 3MF precision) and drops triangles that collapse. Slicers need shared vertices to see a closed surface.
+export function weld(p, t) {
+  const id = new Map(), q = [], idx = [], map = new Int32Array(p.length / 3);
+  for (let v = 0; v < map.length; v++) {
+    const x = r4(p[3*v]), y = r4(p[3*v+1]), z = r4(p[3*v+2]), key = x + "," + y + "," + z;
+    let k = id.get(key); if (k === undefined) { k = q.length / 3; id.set(key, k); q.push(x, y, z); }
+    map[v] = k;
+  }
+  for (let f = 0; f < t.length; f += 3) { const a = map[t[f]], b = map[t[f+1]], c = map[t[f+2]]; if (a !== b && b !== c && a !== c) idx.push(a, b, c); }
+  return { p: q, i: idx };
+}
+
 // 3MF: one object per mesh. The model text is written in pieces of CHUNK items, never as one huge string,
 // so very large meshes do not hit the browser's string size limit.
 const CHUNK = 20000;
@@ -30,7 +42,7 @@ export function threeMF(objs) {
   const each = (n, item) => { for (let a = 0; a < n; a += CHUNK) { let s = ""; for (let k = a; k < Math.min(n, a + CHUNK); k++) s += item(k); put(s); } };
   put(`<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources>`);
   objs.forEach((o, k) => {
-    const p = o.p, t = o.i;
+    const { p, i: t } = weld(o.p, o.i);
     put(`<object id="${k + 1}" type="model" name="${xmlEsc(o.name || "object")}"><mesh><vertices>`);
     each(p.length / 3, (v) => `<vertex x="${r4(p[3*v])}" y="${r4(p[3*v+1])}" z="${r4(p[3*v+2])}"/>`);
     put("</vertices><triangles>");
