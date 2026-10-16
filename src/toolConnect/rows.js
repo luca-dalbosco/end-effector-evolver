@@ -20,10 +20,10 @@ export function numRow(C, host, label, cfg, key, hidden = () => false, rerun = t
 }
 
 // like numRow, but shows the real size (base + adjust); the json still stores the adjust range
-export function absRow(C, host, label, cfg, key, base) {
+export function absRow(C, host, label, cfg, key, base, floor = -Infinity) { // floor: lowest absolute value shown
   const rnd = (v) => Math.round(v * 100) / 100, rec = cfg.recommendedRange;
   const nr = numberRow({ label, cfg, get: () => base() + C.S[key], set: (v) => (C.S[key] = rnd(v - base())), live: () => { C.sync(); C.drawRobot(); }, commit: C.schedule,
-    clamp: () => !C.advanced, off: () => base() == null, bounds: () => [rnd(base() + cfg.min), rnd(base() + cfg.max)], digits: 2,
+    clamp: () => !C.advanced, off: () => base() == null, bounds: () => [rnd(Math.max(floor, base() + cfg.min)), rnd(base() + cfg.max)], digits: 2,
     rate: () => okWarn(rec, C.S[key]) });
   host.append(nr.el); C.refreshers.push(nr.refresh);
 }
