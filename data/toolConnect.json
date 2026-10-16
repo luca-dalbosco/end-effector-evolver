@@ -52,12 +52,11 @@
     "objectGrowMm": { "min": 0, "max": 30, "step": 0.5, "default": 0, "recommendedRange": [0, 5], "note": "Gap: how far a red object is offset (grown evenly in all directions). 0 = only the object itself." }
   },
   "bolt": {
-    "lengthMarginMm": 0.25,
     "shape": { "default": "slot", "options": [{ "id": "cylinder", "label": "Cylinder (above the head only)" }, { "id": "slot", "label": "Slot (runs outward from the flange centre)" }] },
     "slotLengthMm": { "min": 0, "max": 200, "step": 1, "default": 25, "recommendedRange": [10, 50], "note": "How far the slot runs outward from each screw, away from the flange centre. Keeps inner screws reachable." },
     "diameterMarginMm": 0.25,
     "diameterAdjustMm": { "min": -1, "max": 10, "step": 0.25, "default": 0, "recommendedRange": [0, 2], "note": "Added to the head clearance diameter of the robot side (Allen head + 0.25)." },
-    "lengthAdjustMm": { "min": -1, "max": 50, "step": 0.25, "default": 0, "recommendedRange": [0, 5], "note": "Added to the head height + 0.25 of the robot side." }
+    "lengthAdjustMm": { "min": -50, "max": 50, "step": 0.25, "default": 0, "recommendedRange": [0, 5], "note": "Added to the head diameter of the robot side. Counted from the top face of the tool start." }
   },
   "refine": {
     "voxelBudget": { "min": 5000, "max": 200000, "step": 1000, "default": 40000, "note": "Maximum voxels in the refined grid. If it would be more, the refined voxel is made coarser automatically." },
