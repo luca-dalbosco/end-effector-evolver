@@ -21,9 +21,9 @@ export function initClearance(C, host) {
     const R = st.dims.plateOuter / 2, sc = st.dims.screws, t = st.dims.thickness;
     const bolts = [];
     if (sc && sc.headH) {
-      const len = Math.max(0.1, sc.headH + tc.bolt.lengthMarginMm + S.bl), slot = S.bshape === "slot" ? Math.max(0, S.bslot) : 0, r = Math.max(0.1, (st.dims.headD + S.bd) / 2);
-      sc.angles.forEach((a) => bolts.push({ x: sc.pcdR * Math.cos((a * Math.PI) / 180), y: sc.pcdR * Math.sin((a * Math.PI) / 180), r, z0: t, z1: t + len, len: slot, pin: false }));
-      if (st.dims.pinHole) bolts.push({ x: sc.pcdR, y: 0, r: Math.max(0.1, (st.dims.dowelD + tc.bolt.diameterMarginMm + S.bd) / 2), z0: t, z1: t + len, len: slot, pin: true }); // the dowel sits on the pitch circle at angle 0
+      const len = Math.max(0, st.dims.headD + S.bl), slot = S.bshape === "slot" ? Math.max(0, S.bslot) : 0, r = Math.max(0.1, (st.dims.headD + S.bd) / 2);
+      sc.angles.forEach((a) => bolts.push({ x: sc.pcdR * Math.cos((a * Math.PI) / 180), y: sc.pcdR * Math.sin((a * Math.PI) / 180), r, z0: 0, z1: t + len, len: slot, pin: false })); // from the plate bottom: covers the whole bolt through the plate, seat included
+      if (st.dims.pinHole) bolts.push({ x: sc.pcdR, y: 0, r: Math.max(0.1, (st.dims.dowelD + tc.bolt.diameterMarginMm + S.bd) / 2), z0: 0, z1: t + len, len: slot, pin: true }); // the dowel sits on the pitch circle at angle 0
     }
     return { R, zTop: t, zMin, robotR: R + C.robot.mm, bolts: bolts.length ? bolts : null, bed: S.print };
   };
@@ -49,7 +49,7 @@ export function initClearance(C, host) {
   head(host, "Bolt Clearance").append(help("boltClearance"));
   const boltInfo = document.createElement("div"); boltInfo.style.cssText = "font-size:12px;margin-bottom:4px"; host.append(boltInfo);
   absRow(C, host, "Diameter (mm)", tc.bolt.diameterAdjustMm, "bd", () => getStart()?.dims.headD ?? null);
-  absRow(C, host, "Height (mm)", tc.bolt.lengthAdjustMm, "bl", () => { const sc = getStart()?.dims.screws; return sc?.headH != null ? sc.headH + tc.bolt.lengthMarginMm : null; });
+  absRow(C, host, "Height (mm)", tc.bolt.lengthAdjustMm, "bl", () => getStart()?.dims.headD ?? null, 0); // lowest height = the top face of the tool start
   const bsRow = document.createElement("div"); bsRow.className = "row"; bsRow.innerHTML = "<label>Shape</label>";
   const bsSel = document.createElement("select"); tc.bolt.shape.options.forEach((o) => bsSel.add(new Option(o.label, o.id)));
   bsSel.onchange = pick(bsSel, "Bolt clearance shape", () => S.bshape, (v) => { S.bshape = v; C.sync(); C.drawRobot(); C.schedule(); });
