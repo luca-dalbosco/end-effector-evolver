@@ -7,7 +7,32 @@ const QUAD = [
   [[0, 1, 0], [0, 1, 1], [1, 1, 1], [1, 1, 0]], [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]],
   [[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]],
 ];
-export function exposed(mask, nx, ny, nz, h, org) {
+// Two solid cells that touch only along an edge (the other two cells around that edge empty) make an edge shared by four faces,
+// which slicers read as non-manifold. One of the two empty cells is filled (the one with the higher score) so the edge becomes a normal bend.
+// sol: 1 = solid, changed in place. Repeats until no such edge is left (a fill can create a new one). Returns the number of cells added.
+function fillPinches(sol, nx, ny, nz, score) {
+  const str = [1, nx, nx * ny], dim = [nx, ny, nz];
+  let added = 0;
+  for (let pass = 0; pass < 32; pass++) {
+    let changed = false;
+    for (let ax = 0; ax < 3; ax++) {
+      const u = (ax + 1) % 3, w = (ax + 2) % 3, su = str[u], sw = str[w];
+      for (let z = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
+        const c = [x, y, z]; if (c[u] + 1 >= dim[u] || c[w] + 1 >= dim[w]) continue;
+        const i = x + nx * (y + ny * z), a = sol[i], b = sol[i + su], d = sol[i + sw], e = sol[i + su + sw];
+        let p, q;
+        if (a && e && !b && !d) { p = i + su; q = i + sw; } else if (b && d && !a && !e) { p = i; q = i + su + sw; } else continue;
+        const k = score && score[q] > score[p] ? q : p;
+        sol[k] = 1; added++; changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return added;
+}
+
+export function exposed(src, nx, ny, nz, h, org) {
+  const mask = Uint8Array.from(src, (v) => (v ? 1 : 0)); fillPinches(mask, nx, ny, nz);
   const at = (x, y, z) => x >= 0 && y >= 0 && z >= 0 && x < nx && y < ny && z < nz && mask[x + nx * (y + ny * z)] === 1;
   let q = 0;
   for (let z = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++)
@@ -31,8 +56,12 @@ export function exposed(mask, nx, ny, nz, h, org) {
 }
 
 // Surface mesh of the 0.5 level of a 0..1 field (naive surface nets): one vertex per cell the surface crosses, one quad per crossed edge.
-export function surfaceNets(f, nx, ny, nz, h, org) {
-  const iso = 0.5, mx = nx + 1, my = ny + 1, vid = new Int32Array(mx * my * (nz + 1)).fill(-1), v = new Float32Array(8);
+export function surfaceNets(f0, nx, ny, nz, h, org) {
+  const iso = 0.5, f = Float32Array.from(f0), sol = new Uint8Array(f.length); // f: private copy, pinched edges are closed in it
+  for (let c = 0; c < f.length; c++) if (f[c] > iso) sol[c] = 1;
+  fillPinches(sol, nx, ny, nz, f);
+  for (let c = 0; c < f.length; c++) if (sol[c] && !(f[c] > iso)) f[c] = iso + 1e-3;
+  const mx = nx + 1, my = ny + 1, vid = new Int32Array(mx * my * (nz + 1)).fill(-1), v = new Float32Array(8);
   const val = (x, y, z) => (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz ? 0 : f[x + nx * (y + ny * z)]);
   const EDGES = []; for (let a = 0; a < 8; a++) for (let k = 0; k < 3; k++) if (!(a & (1 << k))) EDGES.push([a, a | (1 << k)]);
   const pos = [], nor = [];
