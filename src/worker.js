@@ -49,7 +49,7 @@ const viewMesh = (s, q) => { const me = s.mesh({ tolerance: q.toleranceMm, angul
 
 const handlers = {
   async import(m) { return addPart(m, await importSTEP(new Blob([m.data]))); },
-  async primitive(m) { const { buildPrimitive } = await import("./primitives.js"); return addPart(m, buildPrimitive(m.kind, m.size)); },
+  async primitive(m) { const { buildPrimitive } = await import("./primitives.js"); return addPart(m, buildPrimitive(m.kind, m.size, m.scale)); },
   drop(m) { shapes.get(m.sid)?.delete?.(); shapes.delete(m.sid); },
   exportScene,
   build(m) {
