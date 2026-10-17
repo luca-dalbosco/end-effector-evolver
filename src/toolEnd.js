@@ -10,7 +10,7 @@ import { meshFrom, onViewClick } from "./viewer.js";
 export function initToolEnd({ scene, cam, renderer, orbit, geo, $, list, view }) {
   const refreshers = [], refresh = () => refreshers.forEach((f) => f()); // this stage's rows only (a gizmo drag refreshes them on every move)
   const limit = te.maxFileSizeMB.default; // internal limit: edit it in data/toolEnd.json, not shown in the UI
-  let part = null, partKind = null, cur = null, stage = "A", primKind = te.primitives[0].id, primSize = te.primitiveSize.default;
+  let part = null, partKind = null, cur = null, stage = "A", primKind = te.primitives[0].id, primSize = te.primitiveSize.default, primScale = [1, 1, 1];
   const mine = []; // list entries that are tool-end parts (the flange is not in here)
   let sidN = 0; // each part gets an id; the worker keeps its B-rep under it
   const dom = renderer.domElement;
@@ -76,7 +76,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, geo, $, list, view })
     cur = it && mine.includes(it) ? it : null; // the flange row selects nothing here
     part = cur ? cur.object : null; partKind = cur ? cur.kind : null;
     attachAll(part);
-    if (cur?.kind) { primKind = cur.kind; primSize = cur.size; kindSel.value = primKind; } // dropdown and size show the selected primitive
+    if (cur?.kind) { primKind = cur.kind; primSize = cur.size; primScale = [...cur.scale]; kindSel.value = primKind; } // dropdown and size show the selected primitive
     syncGizmo(); refresh();
   }
   list.onSelect(choose);
@@ -85,7 +85,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, geo, $, list, view })
     const mesh = meshFrom(m, mat.clone()); mesh.userData.base = true; // "base" = the mesh the list makes transparent
     const grp = new THREE.Group(); grp.userData.fg = m.fg; grp.add(mesh);
     const it = list.add({ name, object: grp, onRemove: dropPart });
-    it.kind = kind; it.size = kind ? primSize : null; it.sid = sid; mine.push(it); scene.add(grp);
+    it.kind = kind; it.size = kind ? primSize : null; it.scale = [...primScale]; it.sid = sid; mine.push(it); scene.add(grp);
     list.select(it);
     trackPart(it, "Add");
   }
@@ -149,7 +149,30 @@ export function initToolEnd({ scene, cam, renderer, orbit, geo, $, list, view })
   function sendPrim() {
     if (!(primSize > 0)) return say("bad", "✖ Size must be above 0.");
     $("status").textContent = "Building…";
-    geo("primitive", { kind: primKind, size: primSize, sid: ++sidN, name: te.primitives.find((p) => p.id === primKind).label }, onPart);
+    geo("primitive", { kind: primKind, size: primSize, scale: primScale, sid: ++sidN, name: te.primitives.find((p) => p.id === primKind).label }, onPart);
+  }
+  function applyPrim() { // rebuild the selected primitive with the type, size and scale shown above; position and rotation stay
+    const it = cur; if (!it?.kind) return say("bad", "✖ Select a primitive first.");
+    if (!(primSize > 0) || !primScale.every((v) => v > 0)) return say("bad", "✖ Size and scale must be above 0.");
+    const next = { kind: primKind, size: primSize, scale: [...primScale], sid: ++sidN }, old = { kind: it.kind, size: it.size, scale: [...it.scale], sid: it.sid };
+    $("status").textContent = "Building…";
+    geo("primitive", { ...next, name: it.name }, (m) => {
+      $("status").textContent = "Ready";
+      if (!m.ok) return say("bad", "✖ " + m.error);
+      const fresh = meshFrom(m.mesh, mat.clone()); fresh.userData.base = true;
+      const swap = (to, from) => { // show the shape "to"; "mesh" holds the mesh of that shape
+        const grp = it.object, oldMesh = grp.children.find((c) => c.userData.base);
+        const shown = to.mesh ?? fresh; if (oldMesh) { grp.remove(oldMesh); from.mesh = oldMesh; }
+        grp.add(shown); grp.userData.fg = to.fg ?? m.fg;
+        Object.assign(it, { kind: to.kind, size: to.size, scale: [...to.scale], sid: to.sid });
+        if (cur === it) { primKind = it.kind; primSize = it.size; primScale = [...it.scale]; kindSel.value = primKind; }
+        refresh();
+      };
+      const nw = { ...next, fg: m.fg, mesh: fresh }, od = { ...old, fg: it.object.userData.fg };
+      swap(nw, od);
+      record("Edit " + it.name, () => swap(od, nw), () => swap(nw, od));
+      say("ok", "✔ Updated " + it.name);
+    });
   }
   const kindSel = document.createElement("select");
   te.primitives.forEach((p) => kindSel.add(new Option(p.label, p.id)));
@@ -157,7 +180,8 @@ export function initToolEnd({ scene, cam, renderer, orbit, geo, $, list, view })
   const prim = blk("Add a primitive");
   kindSel.style.marginBottom = "4px"; prim.append(kindSel);
   numRow("Size (mm)", te.primitiveSize, () => primSize, (v) => { primSize = v; }, false, prim, "primitiveSize");
-  prim.append(btn("Add primitive", sendPrim));
+  ["X", "Y", "Z"].forEach((a, i) => numRow("Scale " + a, te.primitiveScale, () => primScale[i], (v) => { primScale[i] = v; }, false, prim, "primitiveScale"));
+  prim.append(btn("Add primitive", sendPrim), btn("Apply to selected primitive", applyPrim));
   blk("Selected part").append(btn("Remove selected part", () => cur && list.remove(cur)));
   body.append(msg);
 
