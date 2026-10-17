@@ -99,7 +99,8 @@ export function numberRow(o) {
   const n = Object.assign(el("input"), { type: "number", step: cfg.step });
   const tipText = [helpText[o.help], o.note].filter(Boolean).join(" "); // the grey note under the row lives in the "?" now (the number colour shows ok / warn)
   if (tipText && !o.compact) l.append(tipIcon(tipText));
-  if (o.compact) d.append(l, n); else d.append(l, r, n);
+  const warnMsg = el("div"); warnMsg.style.cssText = "display:none;font-size:11px;margin-top:2px"; // shown under the row while the value is outside the recommended range
+  if (o.compact) d.append(l, n); else d.append(l, r, n, warnMsg);
   const shown = (v) => (o.digits == null ? v : Math.round(v * 10 ** o.digits) / 10 ** o.digits);
   const change = (v) => { o.set(v); o.live?.(); };
   let from = null; // value before the current slider drag or typed value (for undo)
@@ -122,7 +123,10 @@ export function numberRow(o) {
     const v = shown(o.get()); if (!Number.isFinite(v)) return; // greyed-out rows keep showing their value when they have one
     if (o.bounds) { const [lo, hi] = o.bounds(); r.min = lo; r.max = hi; }
     r.value = n.value = v; r.disabled = !!o.lockSlider?.();
-    n.className = o.rate ? o.rate(v) : rateOf(cfg, v);
+    const rate = n.className = o.rate ? o.rate(v) : rateOf(cfg, v);
+    const rec = cfg.recommendedRange, range = rec ? ` (recommended ${rec[0]} to ${rec[1]})` : "";
+    warnMsg.className = rate; warnMsg.style.display = rate === "bad" || rate === "warn" ? "" : "none";
+    warnMsg.textContent = rate === "bad" ? "⚠ Not recommended: this value can give bad or unusable results." + range : rate === "warn" ? "Outside the recommended range." + range : "";
   }
   return { el: d, refresh };
 }
