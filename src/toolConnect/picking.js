@@ -5,6 +5,8 @@ import tc from "../../data/toolConnect.json";
 import { help, segmented, pick } from "../ui.js";
 import { record } from "../history.js";
 import { onViewClick } from "../viewer.js";
+import { initHover } from "../hover.js";
+import { faceTris } from "../faceSnap.js";
 import { head, btn, numRow } from "./rows.js";
 
 export function initPicking(C, host) {
@@ -94,6 +96,15 @@ export function initPicking(C, host) {
     const fi = faceAt(h.it.object, h.hit); if (fi < 0) return;
     act(`${mode === "connect" ? "Connect" : "Avoid"} face ${fi + 1} of ${h.it.name}`, () => (mode === "connect" ? toggleConnect(h.it, fi) : toggleAvoid("face", h.it, fi)));
   });
+  // hover: show what a click would pick (the face, or the whole object); shift = quick avoid, like a click
+  initHover({ dom, cam, active: () => C.tab === "C" && !C.busy(),
+    targets: () => shown().filter((i) => i.deletable !== false).map((i) => ({ it: i, mesh: baseMesh(i.object) })),
+    describe: ({ it, mesh }, hit, e) => {
+      const mode = e.shiftKey ? (clickMode === "object" ? "object" : "face") : clickMode, color = mode === "connect" ? 0x2ecc71 : 0xe53935;
+      if (mode === "object") return { key: mesh.uuid, tris: null, color };
+      const tris = faceTris(mesh, it.object, hit.faceIndex); // curved faces count too
+      return tris && { key: `${mesh.uuid}:${tris[0]}`, tris, color };
+    } });
   const dropMesh = (m) => { m.parent?.remove(m); m.geometry.dispose(); };
   function dropEntry(en) { if (en.ov) { dropMesh(en.ov); en.ov = null; } if (en.gap) { dropMesh(en.gap); en.gap = null; } }
   // forget entries of deleted rows, or whose mesh was replaced
