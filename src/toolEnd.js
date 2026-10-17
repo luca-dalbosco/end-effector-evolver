@@ -6,11 +6,13 @@ import te from "../data/toolEnd.json";
 import { section, help, numberRow, segmented } from "./ui.js";
 import { record, isReplaying } from "./history.js";
 import { meshFrom, onViewClick } from "./viewer.js";
+import { initHover } from "./hover.js";
+import { faceAt, snapTo, overlayMesh, nearestAnchor, marker } from "./faceSnap.js";
 
 export function initToolEnd({ scene, cam, renderer, orbit, geo, $, list, view }) {
   const refreshers = [], refresh = () => refreshers.forEach((f) => f()); // this stage's rows only (a gizmo drag refreshes them on every move)
   const limit = te.maxFileSizeMB.default; // internal limit: edit it in data/toolEnd.json, not shown in the UI
-  let part = null, partKind = null, cur = null, stage = "A", primKind = te.primitives[0].id, primSize = te.primitiveSize.default;
+  let part = null, partKind = null, cur = null, stage = "A", primKind = te.primitives[0].id, primSize = te.primitiveSize.default, primScale = [1, 1, 1];
   const mine = []; // list entries that are tool-end parts (the flange is not in here)
   let sidN = 0; // each part gets an id; the worker keeps its B-rep under it
   const dom = renderer.domElement;
@@ -61,8 +63,40 @@ export function initToolEnd({ scene, cam, renderer, orbit, geo, $, list, view })
     const targets = list.items().filter((i) => i.object.visible);
     const meshes = targets.map((i) => i.object.children.find((c) => c.userData.base)).filter(Boolean);
     const hit = ray.intersectObjects(meshes, false)[0]; if (!hit) return;
-    const it = targets.find((i) => i.object.children.includes(hit.object)); if (it) list.select(it);
+    const it = targets.find((i) => i.object.children.includes(hit.object)); if (!it) return;
+    if (snap) return snapClick(it, hit);
+    list.select(it);
   });
+
+  // ---------- snap faces: click a face of the part to move, then the face it should stick to ----------
+  let snap = null; // null = off, otherwise { a } once the first face is picked
+  const snapBtn = btn("Snap faces", () => (snap ? endSnap("") : startSnap()));
+  function startSnap() { snap = {}; snapBtn.textContent = "Cancel snapping"; say("", "Click a flat face of the part you want to move. Click near its middle, a corner or the middle of an edge to pick that point."); }
+  function endSnap(text, cls = "") { if (snap?.a) { for (const m of [snap.a.ov, snap.a.mk]) { m.removeFromParent(); m.geometry.dispose(); } } snap = null; snapBtn.textContent = "Snap faces"; say(cls, text); }
+  function snapClick(it, hit) {
+    const f = faceAt(hit.object, it.object, hit.faceIndex); if (!f.ok) return say("bad", "✖ Only flat faces can snap. Click a flat face.");
+    const an = nearestAnchor(hit.object, f, hit.point); f.c = an.p; // from here on the face's "centre" is the picked point
+    if (!snap.a) {
+      if (!mine.includes(it)) return say("bad", "✖ First click a face of the part to move (the robot side cannot move).");
+      list.select(it); snap.a = { it, f, mesh: hit.object, ov: overlayMesh(hit.object, f.tris, 0x2e9e4f, 0.7), mk: marker(hit.object, an.p), kind: an.kind };
+      return say("", `Picked the ${an.kind}. Now click the face it should stick to (on another object), near the point it should meet.`);
+    }
+    if (it === snap.a.it) return say("bad", "✖ Pick a face on a different object.");
+    const o = snap.a.it.object, b = pose(o); snapTo(o, snap.a.mesh, snap.a.f, hit.object, f);
+    const a = pose(o); setPose(o, a); // refresh the number boxes
+    record("Snap " + snap.a.it.name, () => setPose(o, b), () => setPose(o, a));
+    endSnap(`✔ Snapped (${snap.a.kind} to ${an.kind}). Move or rotate it with the arrows if needed.`, "ok");
+  }
+  document.addEventListener("stage", () => snap && endSnap(""));
+  // while snapping: show the face and the point a click would pick (only where a click is allowed)
+  initHover({ dom, cam, active: () => !!snap && stage === "B",
+    targets: () => list.items().filter((i) => i.object.visible).map((i) => ({ it: i, mesh: i.object.children.find((c) => c.userData.base) })).filter((t) => t.mesh),
+    describe: ({ it, mesh }, hit) => {
+      if (snap.a ? it === snap.a.it : !mine.includes(it)) return null;
+      const f = faceAt(mesh, it.object, hit.faceIndex); if (!f.ok) return null;
+      const an = nearestAnchor(mesh, f, hit.point);
+      return { key: `${mesh.uuid}:${f.tris[0]}:${an.p.toArray()}`, tris: f.tris, color: 0x2e9e4f, point: an.p };
+    } });
 
   // ---------- parts in the scene ----------
   const msg = document.createElement("div"); msg.style.cssText = "font-size:12px;margin:6px 0";
@@ -76,7 +110,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, geo, $, list, view })
     cur = it && mine.includes(it) ? it : null; // the flange row selects nothing here
     part = cur ? cur.object : null; partKind = cur ? cur.kind : null;
     attachAll(part);
-    if (cur?.kind) { primKind = cur.kind; primSize = cur.size; kindSel.value = primKind; } // dropdown and size show the selected primitive
+    if (cur?.kind) { primKind = cur.kind; primSize = cur.size; primScale = [...cur.scale]; kindSel.value = primKind; } // dropdown and size show the selected primitive
     syncGizmo(); refresh();
   }
   list.onSelect(choose);
@@ -85,7 +119,7 @@ export function initToolEnd({ scene, cam, renderer, orbit, geo, $, list, view })
     const mesh = meshFrom(m, mat.clone()); mesh.userData.base = true; // "base" = the mesh the list makes transparent
     const grp = new THREE.Group(); grp.userData.fg = m.fg; grp.add(mesh);
     const it = list.add({ name, object: grp, onRemove: dropPart });
-    it.kind = kind; it.size = kind ? primSize : null; it.sid = sid; mine.push(it); scene.add(grp);
+    it.kind = kind; it.size = kind ? primSize : null; it.scale = [...primScale]; it.sid = sid; mine.push(it); scene.add(grp);
     list.select(it);
     trackPart(it, "Add");
   }
@@ -149,7 +183,30 @@ export function initToolEnd({ scene, cam, renderer, orbit, geo, $, list, view })
   function sendPrim() {
     if (!(primSize > 0)) return say("bad", "✖ Size must be above 0.");
     $("status").textContent = "Building…";
-    geo("primitive", { kind: primKind, size: primSize, sid: ++sidN, name: te.primitives.find((p) => p.id === primKind).label }, onPart);
+    geo("primitive", { kind: primKind, size: primSize, scale: primScale, sid: ++sidN, name: te.primitives.find((p) => p.id === primKind).label }, onPart);
+  }
+  function applyPrim() { // rebuild the selected primitive with the type, size and scale shown above; position and rotation stay
+    const it = cur; if (!it?.kind) return say("bad", "✖ Select a primitive first.");
+    if (!(primSize > 0) || !primScale.every((v) => v > 0)) return say("bad", "✖ Size and scale must be above 0.");
+    const next = { kind: primKind, size: primSize, scale: [...primScale], sid: ++sidN }, old = { kind: it.kind, size: it.size, scale: [...it.scale], sid: it.sid };
+    $("status").textContent = "Building…";
+    geo("primitive", { ...next, name: it.name }, (m) => {
+      $("status").textContent = "Ready";
+      if (!m.ok) return say("bad", "✖ " + m.error);
+      const fresh = meshFrom(m.mesh, mat.clone()); fresh.userData.base = true;
+      const swap = (to, from) => { // show the shape "to"; "mesh" holds the mesh of that shape
+        const grp = it.object, oldMesh = grp.children.find((c) => c.userData.base);
+        const shown = to.mesh ?? fresh; if (oldMesh) { grp.remove(oldMesh); from.mesh = oldMesh; }
+        grp.add(shown); grp.userData.fg = to.fg ?? m.fg;
+        Object.assign(it, { kind: to.kind, size: to.size, scale: [...to.scale], sid: to.sid });
+        if (cur === it) { primKind = it.kind; primSize = it.size; primScale = [...it.scale]; kindSel.value = primKind; }
+        refresh();
+      };
+      const nw = { ...next, fg: m.fg, mesh: fresh }, od = { ...old, fg: it.object.userData.fg };
+      swap(nw, od);
+      record("Edit " + it.name, () => swap(od, nw), () => swap(nw, od));
+      say("ok", "✔ Updated " + it.name);
+    });
   }
   const kindSel = document.createElement("select");
   te.primitives.forEach((p) => kindSel.add(new Option(p.label, p.id)));
@@ -157,7 +214,9 @@ export function initToolEnd({ scene, cam, renderer, orbit, geo, $, list, view })
   const prim = blk("Add a primitive");
   kindSel.style.marginBottom = "4px"; prim.append(kindSel);
   numRow("Size (mm)", te.primitiveSize, () => primSize, (v) => { primSize = v; }, false, prim, "primitiveSize");
-  prim.append(btn("Add primitive", sendPrim));
+  ["X", "Y", "Z"].forEach((a, i) => numRow("Scale " + a, te.primitiveScale, () => primScale[i], (v) => { primScale[i] = v; }, false, prim, "primitiveScale"));
+  prim.append(btn("Add primitive", sendPrim), btn("Apply to selected primitive", applyPrim));
+  const sb = blk("Snap faces"); sb.append(snapBtn, help("snapFaces")); snapBtn.style.marginRight = "6px";
   blk("Selected part").append(btn("Remove selected part", () => cur && list.remove(cur)));
   body.append(msg);
 
