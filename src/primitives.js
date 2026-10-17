@@ -30,19 +30,17 @@ function faceOf(V, n) {
   return pts.sort((a, b) => ang(a) - ang(b));
 }
 
-export function buildPrimitive(kind, size) {
+// scale = [x, y, z] stretch factors (1 = unchanged). The size is stretched per axis: width = size·x, depth = size·y, height = size·z.
+export function buildPrimitive(kind, size, scale = [1, 1, 1]) {
   if (!(size > 0)) throw new Error("Size must be above 0.");
-  const r = size / 2;
-  if (kind === "cylinder") return R.makeCylinder(r, size, [0, 0, -r], [0, 0, 1]);
-  if (kind === "sphere") return R.makeSphere(r);
-  if (kind === "cone") {
-    const pts = [[0, -r], [r, -r], [0, r]];
-    let pen = R.draw(pts[0]); for (let i = 1; i < pts.length; i++) pen = pen.lineTo(pts[i]);
-    return pen.close().sketchOnPlane("XZ").revolve([0, 0, 1]);
-  }
+  if (!scale.every((s) => s > 0)) throw new Error("Scale must be above 0.");
+  const r = size / 2, [rx, ry, rz] = scale.map((s) => r * s);
+  if (kind === "cylinder") return R.drawEllipse(rx, ry).sketchOnPlane("XY", -rz).extrude(2 * rz);
+  if (kind === "sphere") return R.makeEllipsoid(rx, ry, rz);
+  if (kind === "cone") return R.drawEllipse(rx, ry).sketchOnPlane("XY", -rz).extrude(2 * rz, { extrusionProfile: { profile: "linear", endFactor: 0 } });
   const make = SOLIDS[kind]; if (!make) throw new Error("Unknown primitive: " + kind);
   const [V, N] = make();
   const k = kind === "cube" ? r : r / Math.max(...V.map((v) => Math.hypot(...v))); // cube: edge = size; others: overall diameter = size
-  const faces = N.map((n) => R.makePolygon(faceOf(V, n).map((p) => p.map((x) => x * k))));
+  const faces = N.map((n) => R.makePolygon(faceOf(V, n).map((p) => p.map((x, i) => x * k * scale[i]))));
   return R.makeSolid(faces);
 }
