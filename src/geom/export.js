@@ -69,3 +69,14 @@ export function stlZip(objs) {
 // Pose of a part as in the 3D view (three.js Euler order XYZ, radians): turn about Z, then Y, then X (all about the origin), then move.
 // Returns the turns in order as [degrees, axis].
 export const placeSteps = (rot) => [[rot[2], [0, 0, 1]], [rot[1], [0, 1, 0]], [rot[0], [1, 0, 0]]].map(([r, ax]) => [(r * 180) / Math.PI, ax]);
+
+// Mesh vertices (flat x,y,z array) of a part as in the 3D view: stretch per axis, then turn (as placeSteps), then move.
+export function placeMesh(v, scale, rot, pos) {
+  const out = Float64Array.from(v), cs = placeSteps(rot).map(([d, ax]) => [Math.cos((d * Math.PI) / 180), Math.sin((d * Math.PI) / 180), ax.indexOf(1)]);
+  for (let k = 0; k < out.length; k += 3) {
+    const q = [out[k] * scale[0], out[k + 1] * scale[1], out[k + 2] * scale[2]];
+    for (const [c, s, a] of cs) { const i = (a + 1) % 3, j = (a + 2) % 3, x = q[i], y = q[j]; q[i] = c * x - s * y; q[j] = s * x + c * y; }
+    out[k] = q[0] + pos[0]; out[k + 1] = q[1] + pos[1]; out[k + 2] = q[2] + pos[2];
+  }
+  return out;
+}

@@ -2,7 +2,7 @@ import { exportSTEP, importSTEP } from "replicad";
 import wasmUrl from "replicad-opencascadejs/wasm?url";
 import { initKernel, buildToolStart } from "./toolStart/cad.js";
 import { replyTo, meshBufs } from "./rpc.js";
-import { stlBytes, threeMF, stlZip, placeSteps } from "./geom/export.js";
+import { stlBytes, threeMF, stlZip, placeSteps, placeMesh } from "./geom/export.js";
 import ts from "../data/toolStart.json";
 import te from "../data/toolEnd.json";
 
@@ -18,20 +18,28 @@ function place(s, p) { // same pose as the 3D view (see placeSteps)
 async function exportScene(m) {
   const own = []; // copies made here, freed afterwards
   try {
-    const parts = m.items.map((it) => {
-      if (it.src === "mesh") return { name: it.name, p: it.p, i: it.i };
+    const parts = [];
+    for (const it of m.items) {
+      if (it.src === "mesh") { parts.push({ name: it.name, p: it.p, i: it.i }); continue; }
       const base = it.src === "start" ? last : shapes.get(it.sid);
       if (!base) throw new Error(`"${it.name}" is not in the geometry engine. Rebuild the robot side or add the part again.`);
-      const s = it.src === "part" ? place(base, it) : base;
+      let b = base; const sc = it.scale ?? [1, 1, 1];
+      if (it.src === "part" && sc.some((x) => x !== 1)) { // scaled part: same factor on all axes = scale the B-rep; stretched primitive = rebuild it; stretched STEP part = mesh only (no B-rep stretch in this kernel build)
+        if (sc.every((x) => x === sc[0])) { b = base.scale(sc[0], [0, 0, 0]); own.push(b); }
+        else if (it.kind) { const { buildPrimitive } = await import("./primitives.js"); b = buildPrimitive(it.kind, it.size, sc); own.push(b); }
+        else { const me = base.mesh({ tolerance: m.tol, angularTolerance: m.ang }); parts.push({ name: it.name, p: placeMesh(me.vertices, sc, it.rot, it.pos), i: me.triangles, stretched: true }); continue; }
+      }
+      const s = it.src === "part" ? place(b, it) : b;
       if (s !== base) own.push(s);
-      return { name: it.name, shape: s };
-    });
+      parts.push({ name: it.name, shape: s });
+    }
     let data, ext = m.format, tris = 0;
     if (m.format === "step") {
+      if (parts.some((p) => p.stretched)) throw new Error("A STEP part stretched unevenly (different X, Y, Z scale) cannot be written as STEP. Use STL or 3MF, or scale it evenly.");
       if (parts.some((p) => !p.shape)) throw new Error("The connector is a mesh and cannot be written as STEP. Use STL or 3MF.");
       data = await exportSTEP(parts.map((p) => ({ shape: p.shape, name: p.name })), { unit: "MM", modelUnit: "MM" }).arrayBuffer();
     } else {
-      const ms = parts.map((p) => { if (!p.shape) return p; const me = p.shape.mesh({ tolerance: m.tol, angularTolerance: m.ang }); return { name: p.name, p: me.vertices, i: me.triangles }; });
+      const ms = parts.map((p) => { if (!p.shape) return { name: p.name, p: p.p, i: p.i }; const me = p.shape.mesh({ tolerance: m.tol, angularTolerance: m.ang }); return { name: p.name, p: me.vertices, i: me.triangles }; });
       tris = ms.reduce((n, o) => n + o.i.length / 3, 0);
       if (m.format === "3mf") data = ab(threeMF(ms));
       else if (ms.length === 1) data = ab(stlBytes(ms[0].p, ms[0].i));
