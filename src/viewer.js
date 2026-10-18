@@ -3,6 +3,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { store } from "./store.js";
+import { initViewCube } from "./viewCube.js";
 
 // a mesh from a worker: { p: positions, n: normals, i: triangle indices } (typed arrays)
 export function meshFrom(m, mat) {
@@ -44,5 +45,6 @@ export function initViewer(view) {
   for (const t of ["pointerdown", "pointermove", "pointerup", "wheel", "keydown", "input", "change", "click", "resize"]) addEventListener(t, wake, { capture: true, passive: true });
   for (const t of ["stage", "advanced", "startbuilt", "workerreply"]) document.addEventListener(t, wake);
   orbit.addEventListener("change", wake); wake();
+  initViewCube({ view, cam, orbit });
   return { renderer, scene, cam, orbit };
 }
