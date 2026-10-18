@@ -3,6 +3,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { store } from "./store.js";
+import { initViewCube } from "./viewCube.js";
 
 // a mesh from a worker: { p: positions, n: normals, i: triangle indices } (typed arrays)
 export function meshFrom(m, mat) {
@@ -33,6 +34,13 @@ export function initViewer(view) {
   Object.assign(tb.style, { position: "absolute", top: "40px", left: "8px", width: "32px", fontSize: "16px" }); view.append(tb); setTheme(store.get("theme") === "light");
   const cam = new THREE.PerspectiveCamera(40, 1, 1, 2000); cam.up.set(0, 0, 1); cam.position.set(90, -90, 70);
   const orbit = new OrbitControls(cam, renderer.domElement);
+  // turntable: the view turns slowly around the model (a viewing option, not a video)
+  const sp = Object.assign(document.createElement("button"), { title: "Turntable: turn the view around the model", textContent: "⟳" });
+  Object.assign(sp.style, { position: "absolute", top: "76px", left: "8px", width: "32px", fontSize: "16px" }); view.append(sp);
+  let spinning = false, spinT = 0;
+  const spin = (t) => { if (!spinning) return; orbit.update((t - spinT) / 1000); spinT = t; requestAnimationFrame(spin); };
+  sp.onclick = () => { spinning = !spinning; orbit.autoRotate = spinning; sp.classList.toggle("on", spinning); sp.style.background = spinning ? "var(--fg)" : ""; sp.style.color = spinning ? "var(--bg)" : ""; if (spinning) { spinT = performance.now(); requestAnimationFrame(spin); } };
+  orbit.autoRotateSpeed = 3;
   scene.add(new THREE.HemisphereLight(0xffffff, 0x888888, 1.2)); const dl = new THREE.DirectionalLight(0xffffff, 1.5); dl.position.set(50, -80, 120); scene.add(dl);
   const grid = new THREE.GridHelper(200, 20, 0x999999, 0xcccccc); grid.rotation.x = Math.PI / 2; scene.add(grid); scene.add(new THREE.AxesHelper(30));
   const resize = () => { renderer.setSize(view.clientWidth, view.clientHeight); cam.aspect = view.clientWidth / view.clientHeight; cam.updateProjectionMatrix(); };
@@ -44,5 +52,6 @@ export function initViewer(view) {
   for (const t of ["pointerdown", "pointermove", "pointerup", "wheel", "keydown", "input", "change", "click", "resize"]) addEventListener(t, wake, { capture: true, passive: true });
   for (const t of ["stage", "advanced", "startbuilt", "workerreply"]) document.addEventListener(t, wake);
   orbit.addEventListener("change", wake); wake();
+  initViewCube({ view, cam, orbit });
   return { renderer, scene, cam, orbit };
 }
