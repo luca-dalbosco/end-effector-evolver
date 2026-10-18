@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { unzipSync, strFromU8 } from "fflate";
 import * as THREE from "three";
-import { stlBytes, threeMF, stlZip, placeSteps } from "../src/geom/export.js";
+import { stlBytes, threeMF, stlZip, placeSteps, placeMesh } from "../src/geom/export.js";
 
 // one right triangle in the z = 0 plane, counter-clockwise seen from +z
 const tri = { name: "A & <B>", p: Float32Array.of(0, 0, 0, 10, 0, 0, 0, 10, 0), i: Uint32Array.of(0, 1, 2) };
@@ -41,4 +41,10 @@ test("pose: the exported turns give the same point as the 3D view (three.js Eule
     for (const [deg, ax] of placeSteps(rot)) turn(out, deg, ax);
     assert.ok(out.distanceTo(view) < 1e-9, `${rot}: ${out.toArray()} vs ${view.toArray()}`);
   }
+});
+
+test("placeMesh matches the three.js pose (stretch, turn XYZ, move)", () => {
+  const v = Float32Array.of(1, 2, 3, -4, 5, 0.5), sc = [2, 0.5, 3], rot = [0.3, -0.7, 1.1], pos = [10, -5, 2];
+  const o = placeMesh(v, sc, rot, pos), m = new THREE.Matrix4().compose(new THREE.Vector3(...pos), new THREE.Quaternion().setFromEuler(new THREE.Euler(...rot, "XYZ")), new THREE.Vector3(...sc));
+  for (let k = 0; k < v.length; k += 3) { const w = new THREE.Vector3(v[k], v[k + 1], v[k + 2]).applyMatrix4(m); for (let a = 0; a < 3; a++) assert.ok(Math.abs(w.getComponent(a) - o[k + a]) < 1e-6); }
 });
