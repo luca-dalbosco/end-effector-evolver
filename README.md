@@ -106,7 +106,7 @@ Voxel uses topology optimisation (SIMP) with a density filter and an optimality-
 ## Contributing and contact
 
 - Bugs, questions and ideas: [GitHub Issues](https://github.com/luca-dalbosco/end-effector-evolver/issues)
-- Support the project: [Ko-fi](https://ko-fi.com/lucad33107)
+- Support the project: [Gumroad](https://lucadalbosco.gumroad.com/l/end-effector-evolver-donation)
 
 ## Licence
 
