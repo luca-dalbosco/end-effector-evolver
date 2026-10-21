@@ -3,7 +3,7 @@ import { TUTORIAL_STEPS } from './tutorialSteps.js';
 import { store } from './store.js';
 
 const LINKS = {
-  donate: 'https://ko-fi.com/lucad33107',
+  donate: 'https://lucadalbosco.gumroad.com/l/end-effector-evolver-donation',
   source: 'https://github.com/luca-dalbosco/end-effector-evolver',      // <- repo link
   contact: 'https://github.com/luca-dalbosco/end-effector-evolver/issues',
 };
@@ -74,7 +74,7 @@ const PAGES = {
       <p>
         <a href="${LINKS.source}" target="_blank" rel="noopener">Source code (GitHub)</a><br>
         <a href="${LINKS.contact}" target="_blank" rel="noopener">Questions, bugs and ideas</a><br>
-        <a href="${LINKS.donate}" target="_blank" rel="noopener">Support the project (Ko-fi)</a>
+        <a href="${LINKS.donate}" target="_blank" rel="noopener">Support the project (Gumroad)</a>
       </p>
       <p><small>Designed by Luca Dalbosco. Co-coded with Claude.</small></p>`,
   },
@@ -115,7 +115,7 @@ const PAGES = {
       tracking and no cookies.</p>
       <p>The Contact link opens our GitHub Issues page. If you write there,
       your message and GitHub username are public and handled by GitHub under
-      its own privacy policy. The Donate link opens Ko-fi, which has its own
+      its own privacy policy. The Donate link opens Gumroad, which has its own
       privacy policy too.</p>`,
   },
   shortcuts: {
