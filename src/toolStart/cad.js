@@ -268,12 +268,15 @@ export function buildToolStart(flange, userSettings = {}) {
   // Dowel (present in every fit mode)
   let pinLength = null;
   const dowelD = hasPin ? g.locatingPin.diameter + 2 * tol.dowelHole : 0;
+  const pinSpots = (g.locatingPin?.anglesDeg ?? [0]).map((deg) => [pcdR * Math.cos((deg * Math.PI) / 180), pcdR * Math.sin((deg * Math.PI) / 180)]); // one dowel at 0° unless anglesDeg lists more
   if (!hasPin) {
     pinLength = 0;
   } else if (s.dowelMode === "hole") {
-    body = cutBy(body, cyl(dowelD, -1, t + 1, pcdR, 0));
-    if (chAway) { body = cutBy(body, coneAway(dowelD / 2, t, pcdR, 0)); chamferCuts.push(dowelD / 2); }
-    if (chRobot) { body = cutBy(body, coneRobot(dowelD / 2, pcdR, 0)); chamferCuts.push(dowelD / 2); }
+    for (const [x, y] of pinSpots) {
+      body = cutBy(body, cyl(dowelD, -1, t + 1, x, y));
+      if (chAway) { body = cutBy(body, coneAway(dowelD / 2, t, x, y)); chamferCuts.push(dowelD / 2); }
+      if (chRobot) { body = cutBy(body, coneRobot(dowelD / 2, x, y)); chamferCuts.push(dowelD / 2); }
+    }
   } else {
     const pinDepth = hasSpigot ? depth : baseDepth;
     pinLength = Math.min(pinDepth - tol.dowelPin, g.locatingPin.depth - tol.dowelPin);
@@ -281,7 +284,7 @@ export function buildToolStart(flange, userSettings = {}) {
     const pinPts = chRobot
       ? [[0, -pinLength], [pr - c, -pinLength], [pr, -pinLength + c], [pr, t / 2], [0, t / 2]]
       : [[0, -pinLength], [pr, -pinLength], [pr, t / 2], [0, t / 2]];
-    body = fuseWith(body, revolveProfile(pinPts).translate([pcdR, 0, 0]));
+    for (const [x, y] of pinSpots) body = fuseWith(body, revolveProfile(pinPts).translate([x, y, 0]));
     warnings.push("Printed pin is not recommended: weaker and less accurate than a metal dowel.");
   }
 
