@@ -186,7 +186,6 @@
       "notes": "Needs printed verification",
       "geometry": {
         "pitchCircleDiameter": 125,
-        "outerDiameter": 160,
         "threadedHoles": {
           "anglesDeg": [30, 90, 150, 210, 270, 330],
           "thread": "M10",
@@ -198,6 +197,158 @@
           "depth": 10,
           "angleDeg": 0,
           "anglesDeg": [0, 180]
+        },
+        "raisedSpigot": {
+          "diameter": 160,
+          "height": 10.5,
+          "wallFlats": {
+            "width": 35.553,
+            "angleDeg": 0
+          }
+        },
+        "centreHole": {
+          "diameter": 80,
+          "fit": "H7",
+          "depth": 9
+        }
+      }
+    },
+    {
+      "id": "fanuc-r2000ib-165f",
+      "brand": "Fanuc",
+      "model": "R-2000iB/165F",
+      "status": "Needs printed verification",
+      "source": "Fanuc ISO flange wrist drawing (165F, 125L, 165R, 150U, 170CF); R-2000iC 165F flange STEP file by AnyKolab (CGTrader)",
+      "notes": "Needs printed verification",
+      "geometry": {
+        "pitchCircleDiameter": 125,
+        "threadedHoles": {
+          "anglesDeg": [30, 90, 150, 210, 270, 330],
+          "thread": "M10",
+          "threadDepth": 16
+        },
+        "locatingPin": {
+          "diameter": 10,
+          "fit": "H7",
+          "depth": 10,
+          "angleDeg": 0,
+          "anglesDeg": [0, 180]
+        },
+        "raisedSpigot": {
+          "diameter": 160,
+          "height": 10.5,
+          "wallFlats": {
+            "width": 35.553,
+            "angleDeg": 0
+          }
+        },
+        "centreHole": {
+          "diameter": 80,
+          "fit": "H7",
+          "depth": 9
+        }
+      }
+    },
+    {
+      "id": "fanuc-r2000ib-165r",
+      "brand": "Fanuc",
+      "model": "R-2000iB/165R",
+      "status": "Needs printed verification",
+      "source": "Fanuc ISO flange wrist drawing (165F, 125L, 165R, 150U, 170CF); R-2000iC 165F flange STEP file by AnyKolab (CGTrader)",
+      "notes": "Needs printed verification",
+      "geometry": {
+        "pitchCircleDiameter": 125,
+        "threadedHoles": {
+          "anglesDeg": [30, 90, 150, 210, 270, 330],
+          "thread": "M10",
+          "threadDepth": 16
+        },
+        "locatingPin": {
+          "diameter": 10,
+          "fit": "H7",
+          "depth": 10,
+          "angleDeg": 0,
+          "anglesDeg": [0, 180]
+        },
+        "raisedSpigot": {
+          "diameter": 160,
+          "height": 10.5,
+          "wallFlats": {
+            "width": 35.553,
+            "angleDeg": 0
+          }
+        },
+        "centreHole": {
+          "diameter": 80,
+          "fit": "H7",
+          "depth": 9
+        }
+      }
+    },
+    {
+      "id": "fanuc-r2000ib-150u",
+      "brand": "Fanuc",
+      "model": "R-2000iB/150U",
+      "status": "Needs printed verification",
+      "source": "Fanuc ISO flange wrist drawing (165F, 125L, 165R, 150U, 170CF); R-2000iC 165F flange STEP file by AnyKolab (CGTrader)",
+      "notes": "Needs printed verification",
+      "geometry": {
+        "pitchCircleDiameter": 125,
+        "threadedHoles": {
+          "anglesDeg": [30, 90, 150, 210, 270, 330],
+          "thread": "M10",
+          "threadDepth": 16
+        },
+        "locatingPin": {
+          "diameter": 10,
+          "fit": "H7",
+          "depth": 10,
+          "angleDeg": 0,
+          "anglesDeg": [0, 180]
+        },
+        "raisedSpigot": {
+          "diameter": 160,
+          "height": 10.5,
+          "wallFlats": {
+            "width": 35.553,
+            "angleDeg": 0
+          }
+        },
+        "centreHole": {
+          "diameter": 80,
+          "fit": "H7",
+          "depth": 9
+        }
+      }
+    },
+    {
+      "id": "fanuc-r2000ib-170cf",
+      "brand": "Fanuc",
+      "model": "R-2000iB/170CF",
+      "status": "Needs printed verification",
+      "source": "Fanuc ISO flange wrist drawing (165F, 125L, 165R, 150U, 170CF); R-2000iC 165F flange STEP file by AnyKolab (CGTrader)",
+      "notes": "Needs printed verification",
+      "geometry": {
+        "pitchCircleDiameter": 125,
+        "threadedHoles": {
+          "anglesDeg": [30, 90, 150, 210, 270, 330],
+          "thread": "M10",
+          "threadDepth": 16
+        },
+        "locatingPin": {
+          "diameter": 10,
+          "fit": "H7",
+          "depth": 10,
+          "angleDeg": 0,
+          "anglesDeg": [0, 180]
+        },
+        "raisedSpigot": {
+          "diameter": 160,
+          "height": 10.5,
+          "wallFlats": {
+            "width": 35.553,
+            "angleDeg": 0
+          }
         },
         "centreHole": {
           "diameter": 80,
