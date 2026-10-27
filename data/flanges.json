@@ -176,6 +176,35 @@
           "angleDeg": 0
         }
       }
+    },
+    {
+      "id": "fanuc-r2000ib-125l",
+      "brand": "Fanuc",
+      "model": "R-2000iB/125L",
+      "status": "Needs printed verification",
+      "source": "Fanuc ISO flange wrist drawing (165F, 125L, 165R, 150U, 170CF); R-2000iC 165F flange STEP file by AnyKolab (CGTrader)",
+      "notes": "Needs printed verification",
+      "geometry": {
+        "pitchCircleDiameter": 125,
+        "outerDiameter": 160,
+        "threadedHoles": {
+          "anglesDeg": [30, 90, 150, 210, 270, 330],
+          "thread": "M10",
+          "threadDepth": 16
+        },
+        "locatingPin": {
+          "diameter": 10,
+          "fit": "H7",
+          "depth": 10,
+          "angleDeg": 0,
+          "anglesDeg": [0, 180]
+        },
+        "centreHole": {
+          "diameter": 80,
+          "fit": "H7",
+          "depth": 9
+        }
+      }
     }
   ]
 }
