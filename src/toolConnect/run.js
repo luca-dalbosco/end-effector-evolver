@@ -3,6 +3,7 @@ import tc from "../../data/toolConnect.json";
 import { esc } from "../ui.js";
 import { rpc, serial } from "../rpc.js";
 import { solidCentroid } from "../geom/voxelize.js";
+import { solveCheck } from "../geom/solveCheck.js";
 import { store } from "../store.js";
 
 export function initRun(C) {
@@ -13,6 +14,8 @@ export function initRun(C) {
   const minutes = (min) => `about ${min < 1 ? "under 1" : min.toFixed(min < 10 ? 1 : 0)} min`;
   const rate = (min) => { const e = tc.estimate; return min == null ? "" : min < e.greenBelowMinutes ? "ok" : min < e.yellowBelowMinutes ? "warn" : "bad"; };
   const bad = (out, m) => (out.innerHTML = `<span class="bad">✖ ${esc(m.error)}</span>`);
+  // a failed solve (NaN, negative or absurd numbers): the warning shown in the panel, and the sag is not shown
+  const trouble = (m) => solveCheck(m, tc.maxSagMm.default), warnHtml = (t) => `<div class="bad" style="margin-top:4px">⚠ ${esc(t)}</div>`;
 
   // time estimate = measured matrix speed × work × a factor; the factor is learned from the last finished run on this computer
   const calib = { gen: 1, ref: 1 };
@@ -60,15 +63,17 @@ export function initRun(C) {
       const p = Object.assign(document.createElement("div"), { className: "rprog" }); p.style.marginTop = "4px";
       p.textContent = `Step ${m.it}/${m.maxIter} · ${(m.c0 / m.c).toFixed(2)}× the stiffness of the coarse design · material ${((m.vol / m.cap) * 100).toFixed(0)}% of the coarse volume · ${fmt(m.elapsed)} elapsed, about ${fmt((m.elapsed / m.it) * (m.maxIter - m.it))} left at most`;
       ui.refOut.append(p);
+      const tr = trouble(m); if (tr) p.innerHTML = warnHtml(tr) + esc(p.textContent);
       if (m.mesh) C.keep(() => C.showResult(m.mesh));
       return;
     }
     C.setPhase("idle");
     if (!m.ok) { bad(ui.refOut, m); if (C.coarseGhost && !C.result) { C.result = C.coarseGhost; C.result.material = C.mats.res; C.coarseGhost = null; } return; }
     if (!m.stopped && predRef && secPerElem != null) learn("ref", m.elapsed, refWork(predRef.count, m.it) * secPerElem * 1000);
-    C.showResult(m.mesh); C.canClear = true; ui.rfBar.value = m.stopped ? ui.rfBar.value : 1; if (!m.stopped) C.storeGen(S.ref, m.mesh, m.stats, m.sag); C.sync();
-    const t = m.stats; C.vol = t.volCm3; C.over = t.overhang; C.sag = m.sag; C.showSummary();
-    ui.refOut.innerHTML = `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔" : "⚠ The robot side and the tool are no longer connected."} Refine ${m.stopped ? "stopped" : "finished"} after ${m.it} steps in ${fmt(m.elapsed)}. Voxel ${m.h.toFixed(2)} mm (analysis was ${m.hc.toFixed(2)} mm).` + (C.advanced ? `<br>Stiffness: ${(m.c0 / m.c).toFixed(2)}× the coarse design. Material: ${((m.vol / m.cap) * 100).toFixed(0)}% of the coarse volume. ${t.islands.toLocaleString()} loose voxels dropped.` : "") + "</span>";
+    const tr = trouble(m), sag = tr ? null : m.sag;
+    C.showResult(m.mesh); C.canClear = true; ui.rfBar.value = m.stopped ? ui.rfBar.value : 1; if (!m.stopped) C.storeGen(S.ref, m.mesh, m.stats, sag); C.sync();
+    const t = m.stats; C.vol = t.volCm3; C.over = t.overhang; C.sag = sag; C.showSummary();
+    ui.refOut.innerHTML = `<span class="${t.connected ? "ok" : "bad"}">${t.connected ? "✔" : "⚠ The robot side and the tool are no longer connected."} Refine ${m.stopped ? "stopped" : "finished"} after ${m.it} steps in ${fmt(m.elapsed)}. Voxel ${m.h.toFixed(2)} mm (analysis was ${m.hc.toFixed(2)} mm).` + (C.advanced ? `<br>Stiffness: ${(m.c0 / m.c).toFixed(2)}× the coarse design. Material: ${((m.vol / m.cap) * 100).toFixed(0)}% of the coarse volume. ${t.islands.toLocaleString()} loose voxels dropped.` : "") + "</span>" + (tr ? warnHtml(tr) : "");
   }
   const onRestored = (level) => (m) => { // "restore": the worker holds this finished level again, so it can be smoothed
     if (!m.ok) return bad(ui.refOut, m);
@@ -108,13 +113,15 @@ export function initRun(C) {
       ui.bar.value = m.it / m.maxIter;
       const per = m.elapsed / m.it;
       ui.prog.textContent = `Designing: step ${m.it}/${m.maxIter} · ${fmt(m.elapsed)} elapsed, about ${fmt(per * (m.maxIter - m.it))} left at most` + (C.advanced ? ` · ${(m.c0 / m.c).toFixed(1)}× stiffer than the start · material ${(m.vol * 100).toFixed(0)}% · solver ${m.cg} iterations` : "");
+      const tr = trouble(m); if (tr) ui.prog.innerHTML = warnHtml(tr) + esc(ui.prog.textContent);
       if (m.mesh) C.showResult(m.mesh);
       return;
     }
     if (!m.ok) { C.setPhase("idle"); C.prev.forEach((x) => (x.visible = C.active)); return bad(ui.prog, m); }
-    C.showResult(m.mesh); C.canClear = true; ui.bar.value = m.stopped ? ui.bar.value : 1; C.sag = m.sag;
+    const tr = trouble(m);
+    C.showResult(m.mesh); C.canClear = true; ui.bar.value = m.stopped ? ui.bar.value : 1; C.sag = tr ? null : m.sag;
     if (!m.stopped && secPerElem != null) learn("gen", m.elapsed, predGen * (m.it / S.iters) * secPerElem * 1000);
-    ui.prog.innerHTML = `<span class="ok">Design ${m.stopped ? "stopped" : "finished"} after ${m.it} steps in ${fmt(m.elapsed)}.</span>`;
+    ui.prog.innerHTML = `<span class="ok">Design ${m.stopped ? "stopped" : "finished"} after ${m.it} steps in ${fmt(m.elapsed)}.</span>` + (tr ? warnHtml(tr) : "");
     if (m.stopped) C.setPhase("idle"); else C.phase = "clearing"; // a finished design stays locked until its clearance is back
     ui.clrOut.textContent = "Clearing…"; vw("clear", {}, onCleared); // the voxel result is always cleared
   }

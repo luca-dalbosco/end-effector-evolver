@@ -87,22 +87,27 @@ export function createMultigrid({ nx, ny, nz, elems, Ke, fine, o }) {
     }
     return Math.max(lam, 1e-12) * 1.05; // a little margin: the power iteration approaches from below
   }
+  let drop = null; // coarsest unknowns left out: no stiffness of their own once the earlier ones are taken out
   function factor() { // dense Cholesky of the coarsest stiffness; unused nodes get a 1 on the diagonal
     const L = last, n = L.ndof, K = new Float64Array(n * n);
     for (let q = 0; q < L.act.length; q++) for (let a = 0; a < 8; a++) for (let b = 0; b < 8; b++) for (let d = 0; d < 3; d++) for (let e = 0; e < 3; e++)
       K[n * (3 * (L.base[q] + L.off[a]) + d) + 3 * (L.base[q] + L.off[b]) + e] += L.A[576 * q + 24 * (3 * a + d) + 3 * b + e];
     for (let d = 0; d < n; d++) if (!L.invDiag[d]) { for (let e = 0; e < n; e++) K[n * d + e] = K[n * e + d] = 0; K[n * d + d] = 1; }
+    // a pivot that is (almost) all cancelled out = a coarse movement with no stiffness (nearly singular coarse matrix).
+    // Dividing by it blows the numbers up to Inf / NaN, so that unknown is dropped (held at 0): the V-cycle smoothing still covers it.
+    drop = new Uint8Array(n);
     for (let j = 0; j < n; j++) {
-      let s = K[n * j + j]; for (let k = 0; k < j; k++) s -= K[n * j + k] ** 2;
-      const djj = Math.sqrt(Math.max(s, 1e-30 * (K[n * j + j] || 1))); K[n * j + j] = djj;
+      const kjj = K[n * j + j]; let s = kjj; for (let k = 0; k < j; k++) s -= K[n * j + k] ** 2;
+      if (!(s > o.pivotDrop * kjj)) { drop[j] = 1; K[n * j + j] = 1; for (let i = j + 1; i < n; i++) K[n * i + j] = 0; continue; }
+      const djj = Math.sqrt(s); K[n * j + j] = djj;
       for (let i = j + 1; i < n; i++) { let t = K[n * i + j]; for (let k = 0; k < j; k++) t -= K[n * i + k] * K[n * j + k]; K[n * i + j] = t / djj; }
     }
     chol = K;
   }
   function solveCoarsest(b, x) {
     const n = last.ndof, K = chol;
-    for (let i = 0; i < n; i++) { let s = last.invDiag[i] ? b[i] : 0; for (let k = 0; k < i; k++) s -= K[n * i + k] * x[k]; x[i] = s / K[n * i + i]; }
-    for (let i = n - 1; i >= 0; i--) { let s = x[i]; for (let k = i + 1; k < n; k++) s -= K[n * k + i] * x[k]; x[i] = s / K[n * i + i]; }
+    for (let i = 0; i < n; i++) { if (drop[i]) { x[i] = 0; continue; } let s = last.invDiag[i] ? b[i] : 0; for (let k = 0; k < i; k++) s -= K[n * i + k] * x[k]; x[i] = s / K[n * i + i]; }
+    for (let i = n - 1; i >= 0; i--) { if (drop[i]) { x[i] = 0; continue; } let s = x[i]; for (let k = i + 1; k < n; k++) s -= K[n * k + i] * x[k]; x[i] = s / K[n * i + i]; }
     for (let i = 0; i < n; i++) if (!last.invDiag[i]) x[i] = 0;
   }
 
