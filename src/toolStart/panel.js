@@ -70,7 +70,7 @@ export function initToolStart({ geo, $, startGroup, list }) {
   sec("Fit");
   select("Fit mode", () => ts.fitMode.options, () => settings.fitMode, (v) => { settings.fitMode = v; fixSettings(); }, undefined, fitOk, "fitMode");
   select("Spigot", () => ts.spigotStyle.options, () => settings.spigotStyle, (v) => (settings.spigotStyle = v), undefined, undefined, "spigot"); // in Plate mode: Full = closed plate
-  const hasPockets = () => settings.fitMode !== "plate" && !!(g()?.centreHole?.wallPockets || (settings.fitMode === "plate-spigot-collar" && g()?.raisedSpigot?.wallPockets));
+  const hasPockets = () => settings.fitMode !== "plate" && !!(g()?.centreHole?.wallPockets || (settings.fitMode === "plate-spigot-collar" && (g()?.raisedSpigot?.wallPockets || g()?.raisedSpigot?.wallFlats)));
   check("Wall keys (fit the flange pockets)", () => settings.wallKeys, (v) => (settings.wallKeys = v), () => !hasPockets(), "wallKeys");
   slider("Thickness (mm)", ts.thickness, () => settings.thickness, (v) => (settings.thickness = v), undefined, undefined, "thickness");
   slider("Plate edge margin (mm)", ts.plateEdgeMargin, () => settings.plateMargin, (v) => (settings.plateMargin = v), undefined, undefined, "plateMargin");

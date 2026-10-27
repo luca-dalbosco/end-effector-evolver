@@ -77,6 +77,21 @@ function addWallKeys(body, pockets, kind, wallR, tol, depth, warnings) {
   return { body, n: pockets.count };
 }
 
+// Wall flats: the flange raised spigot has a straight flat (a chord of `width`). The collar gets a matching key
+// (the circle segment beyond the flat, pulled back by the collar tolerance), so the part only fits one way round.
+function addWallFlats(body, flats, spigotR, collarR, tol, depth, warnings) {
+  const dist = Math.sqrt(spigotR * spigotR - (flats.width / 2) ** 2) + tol; // flat distance from the axis, plus clearance
+  if (!(flats.width > 0) || flats.width >= 2 * spigotR || depth <= 0 || collarR - dist <= EPS) {
+    warnings.push("The wall flat key was skipped: the flat does not reach the printed collar.");
+    return { body, n: 0 };
+  }
+  const half = collarR + 1;
+  let key = draw([dist, -half]).lineTo([half, -half]).lineTo([half, half]).lineTo([dist, half]).close().sketchOnPlane("XY", -depth).extrude(depth + KEY_OVERLAP);
+  key = keepIn(key, cyl(2 * (collarR + KEY_OVERLAP), -depth - 1, 1));
+  key = key.rotate(flats.angleDeg ?? 0, [0, 0, 0], [0, 0, 1]);
+  return { body: fuseWith(body, key), n: 1 };
+}
+
 // Revolve a closed (r, z) profile around the Z axis.
 function revolveProfile(points) {
   const pts = points.filter(
@@ -226,6 +241,11 @@ export function buildToolStart(flange, userSettings = {}) {
     if (hasCollar && g.raisedSpigot?.wallPockets) jobs.push([g.raisedSpigot.wallPockets, "collar", rci, tol.collar]);
     for (const [pk, kind, wallR, tl] of jobs) {
       const r = addWallKeys(body, pk, kind, wallR, tl, depth, warnings);
+      body = r.body;
+      keyCount += r.n;
+    }
+    if (hasCollar && g.raisedSpigot?.wallFlats) {
+      const r = addWallFlats(body, g.raisedSpigot.wallFlats, g.raisedSpigot.diameter / 2, rci, tol.collar, depth, warnings);
       body = r.body;
       keyCount += r.n;
     }
