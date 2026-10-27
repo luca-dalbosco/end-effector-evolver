@@ -125,7 +125,7 @@
       "brand": "KUKA",
       "model": "KR 6 /2",
       "status": "Needs printed verification",
-      "source": "KUKA KR 6 /2 DIN/ISO mounting flange drawing (ZH 6 kg); hole layout from the STEP file; courtesy of Laboratorio de Mecatronica y Robotica (LEMUR), Departamento de Mecanica, Universidad de Chile",
+      "source": "KUKA KR 6 /2 DIN/ISO mounting flange drawing (ZH 6 kg); hole layout from the STEP file",
       "geometry": {
         "pitchCircleDiameter": 40,
         "threadedHoles": {
@@ -157,8 +157,8 @@
       "brand": "Dobot",
       "model": "Nova 5",
       "status": "Needs printed verification",
-      "source": "DOBOT Nova series hardware user guide, 4.2.3 Nova 5 end flange dimensions (ISO 9409-1-50-4-M6); courtesy of Fabrica Digital O'Higgins, Universidad de O'Higgins",
-      "notes": "Plate only for now: spigot height and centre hole depth are not in the guide or the ISO 9409-1 preview. Once known, add raisedSpigot { diameter 63, fit h7 (0/-0.03), height ? } and centreHole { diameter 31.5, fit H7 (+0.025/0), depth ? } and remove outerDiameter. Two small unlabelled round features sit left and right of the centre in the guide drawing; ignored.",
+      "source": "DOBOT Nova series hardware user guide, 4.2.3 Nova 5 end flange dimensions (ISO 9409-1-50-4-M6)",
+      "notes": "Plate only for now: spigot height and centre hole depth are not in the guide",
       "geometry": {
         "pitchCircleDiameter": 50,
         "outerDiameter": 63,
