@@ -91,6 +91,6 @@
     "shrinkSettleSteps": 8,
     "firstStep": { "tolerance": 0.0001, "maxCgIterations": 500 },
     "laterSteps": { "tolerance": 0.001, "maxCgIterations": 60 },
-    "multigrid": { "enabled": true, "smoothingSteps": 1, "damping": 1.3, "powerSteps": 10, "directMaxDofs": 600, "maxLevels": 6, "note": "Multigrid preconditioner (Amir, Aage & Lazarov 2014): far fewer solver steps on big grids. damping = Jacobi factor × largest eigenvalue. enabled false = the old Jacobi preconditioner." }
+    "multigrid": { "enabled": true, "smoothingSteps": 1, "damping": 1.3, "powerSteps": 10, "directMaxDofs": 600, "maxLevels": 6, "pivotDrop": 1e-10, "note": "Multigrid preconditioner (Amir, Aage & Lazarov 2014): far fewer solver steps on big grids. damping = Jacobi factor × largest eigenvalue. pivotDrop = a coarsest-level pivot smaller than this × its diagonal is dropped (no stiffness there; stops Inf / NaN). enabled false = the old Jacobi preconditioner." }
   }
 }

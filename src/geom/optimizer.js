@@ -1,6 +1,7 @@
 // Topology optimization: SIMP material model, density filter, optimality-criteria update.
 // Minimizes compliance (maximizes stiffness) with a cap on the amount of material.
 import { createFem } from "./fem.js";
+import { flood } from "./grid.js";
 
 // P: nx, ny, nz, active (1 = element exists), passive (1 = fixed solid), fixedMask, force, vf (material fraction), rmin (filter radius in voxels), maxIter.
 // Refine only: x0 = start density per element (instead of vf). shrink = {tol, step, minFrac}: once the design settles, the material cap is lowered
@@ -9,8 +10,9 @@ import { createFem } from "./fem.js";
 // solver: data/toolConnect.json "solver" block (penalty, minStiffness, moveLimit, stopChange, minSteps, shrinkSettleSteps, firstStep, laterSteps).
 // onStep(info) may be async (lets the worker receive Stop). shouldStop() -> true to stop.
 export async function optimize(P, onStep, shouldStop) {
-  const { nx, ny, nz, active, passive, fixedMask, force, vf, rmin, maxIter, x0, shrink, am, solver: sv } = P;
+  const { nx, ny, nz, fixedMask, force, vf, rmin, maxIter, x0, shrink, am, solver: sv } = P;
   const p = sv.penalty, Emin = sv.minStiffness, move = sv.moveLimit, nel = nx * ny * nz;
+  const active = faceJoined(nx, ny, nz, P.active, fixedMask), passive = P.passive;
   const fem = createFem({ nx, ny, nz, active, Emin, p, mg: sv.multigrid });
   fem.setFixed(fixedMask);
 
@@ -88,6 +90,16 @@ export async function optimize(P, onStep, shouldStop) {
   }
   if (shrink && accepted && c > cRef * (1 + shrink.tol)) { x.set(accepted); filter(); c = accC; vol = accVol; } // the last shrink cost too much stiffness: go back
   return { rho: phys, c, c0: c0 ?? c, cRef: cRef ?? c, vol, it: steps, stopped, converged };
+}
+
+// Active cubes joined to a held node through faces. A piece that touches the rest only at an edge or a corner is a free hinge:
+// it has no stiffness, so the solver breaks down (NaN or a huge sag). Those cubes are left out (density 0).
+export function faceJoined(nx, ny, nz, active, fixedMask) {
+  const sx = nx + 1, sz = sx * (ny + 1), off = [0, 1, 1 + sx, sx, sz, sz + 1, sz + 1 + sx, sz + sx];
+  const held = (e) => { const b = (e % nx) + sx * (Math.floor(e / nx) % ny) + sz * Math.floor(e / (nx * ny)); return off.some((o) => fixedMask[3 * (b + o)]); };
+  const { seen } = flood(active, (e) => held(e), nx, ny, nz), out = new Uint8Array(active.length);
+  for (let e = 0; e < out.length; e++) out[e] = active[e] && seen[e] ? 1 : 0;
+  return out;
 }
 // Additive manufacturing filter (written from Langelaar 2017, "An additive manufacturing filter for topology optimization of print-ready designs").
 // Build direction +Z. A cell can only be as solid as the cells that hold it up: the cell straight below and its 4 side neighbours one layer down
