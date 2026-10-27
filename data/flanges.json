@@ -151,6 +151,31 @@
           "depth": 6.2
         }
       }
+    },
+    {
+      "id": "dobot-nova-5",
+      "brand": "Dobot",
+      "model": "Nova 5",
+      "status": "Needs printed verification",
+      "source": "DOBOT Nova series hardware user guide, 4.2.3 Nova 5 end flange dimensions (ISO 9409-1-50-4-M6); courtesy of Fabrica Digital O'Higgins, Universidad de O'Higgins",
+      "notes": "Plate only for now: spigot height and centre hole depth are not in the guide or the ISO 9409-1 preview. Once known, add raisedSpigot { diameter 63, fit h7 (0/-0.03), height ? } and centreHole { diameter 31.5, fit H7 (+0.025/0), depth ? } and remove outerDiameter. Two small unlabelled round features sit left and right of the centre in the guide drawing; ignored.",
+      "geometry": {
+        "pitchCircleDiameter": 50,
+        "outerDiameter": 63,
+        "threadedHoles": {
+          "count": 4,
+          "thread": "M6",
+          "threadDepth": 6,
+          "startAngleDeg": 45,
+          "spacingDeg": 90
+        },
+        "locatingPin": {
+          "diameter": 6,
+          "fit": "H7",
+          "depth": 6,
+          "angleDeg": 0
+        }
+      }
     }
   ]
 }
