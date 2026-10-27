@@ -79,6 +79,6 @@ test("flanges.json: every flange has what the generator needs", () => {
     const angles = Array.isArray(h.anglesDeg) ? h.anglesDeg : Array.from({ length: h.count }, (_, i) => h.startAngleDeg + i * h.spacingDeg);
     const norm = (a) => ((a % 360) + 360) % 360;
     assert.equal(new Set(angles.map((a) => norm(a).toFixed(3))).size, angles.length, `${f.id}: two screw holes at the same angle`);
-    if (g.locatingPin) assert.ok(!angles.some((a) => Math.abs(norm(a) - norm(g.locatingPin.angleDeg ?? 0)) < 1e-6), `${f.id}: a screw hole sits on the dowel`);
+    if (g.locatingPin) assert.ok(!angles.some((a) => (g.locatingPin.anglesDeg ?? [g.locatingPin.angleDeg ?? 0]).some((p) => Math.abs(norm(a) - norm(p)) < 1e-6)), `${f.id}: a screw hole sits on a dowel`);
   }
 });

@@ -119,6 +119,276 @@
           "depth": 6.2
         }
       }
+    },
+    {
+      "id": "kuka-kr6-2",
+      "brand": "KUKA",
+      "model": "KR 6 /2",
+      "status": "Needs printed verification",
+      "source": "KUKA KR 6 /2 DIN/ISO mounting flange drawing (ZH 6 kg); hole layout from the STEP file",
+      "geometry": {
+        "pitchCircleDiameter": 40,
+        "threadedHoles": {
+          "anglesDeg": [45, 135, 180, 225, 315],
+          "thread": "M6",
+          "threadDepth": 6,
+          "drillDepth": 7
+        },
+        "locatingPin": {
+          "diameter": 6,
+          "fit": "H7",
+          "depth": 6,
+          "angleDeg": 0
+        },
+        "raisedSpigot": {
+          "diameter": 50,
+          "fit": "h7",
+          "height": 6.5
+        },
+        "centreHole": {
+          "diameter": 25,
+          "fit": "H7",
+          "depth": 6.2
+        }
+      }
+    },
+    {
+      "id": "dobot-nova-5",
+      "brand": "Dobot",
+      "model": "Nova 5",
+      "status": "Needs printed verification",
+      "source": "DOBOT Nova series hardware user guide, 4.2.3 Nova 5 end flange dimensions (ISO 9409-1-50-4-M6)",
+      "notes": "Plate only for now: spigot height and centre hole depth are not in the guide",
+      "geometry": {
+        "pitchCircleDiameter": 50,
+        "outerDiameter": 63,
+        "centreHole": {
+          "diameter": 31.5,
+          "fit": "H7"
+        },
+        "threadedHoles": {
+          "count": 4,
+          "thread": "M6",
+          "threadDepth": 6,
+          "startAngleDeg": 45,
+          "spacingDeg": 90
+        },
+        "locatingPin": {
+          "diameter": 6,
+          "fit": "H7",
+          "depth": 6,
+          "angleDeg": 0
+        }
+      }
+    },
+    {
+      "id": "dobot-nova-2",
+      "brand": "Dobot",
+      "model": "Nova 2",
+      "status": "Needs printed verification",
+      "source": "DOBOT Nova series hardware user guide, 4.1.3 Nova 2 end flange dimensions (ISO 9409-1-50-4-M6)",
+      "notes": "Plate only for now: spigot height and centre hole depth are not in the guide",
+      "geometry": {
+        "pitchCircleDiameter": 50,
+        "outerDiameter": 63,
+        "centreHole": {
+          "diameter": 31.5,
+          "fit": "H7"
+        },
+        "threadedHoles": {
+          "count": 4,
+          "thread": "M6",
+          "threadDepth": 6,
+          "startAngleDeg": 45,
+          "spacingDeg": 90
+        },
+        "locatingPin": {
+          "diameter": 6,
+          "fit": "H7",
+          "depth": 6,
+          "angleDeg": 0
+        }
+      }
+    },
+    {
+      "id": "fanuc-r2000ib-125l",
+      "brand": "Fanuc",
+      "model": "R-2000iB/125L",
+      "status": "Needs printed verification",
+      "source": "Fanuc ISO flange wrist drawing (165F, 125L, 165R, 150U, 170CF); R-2000iC 165F flange STEP file by AnyKolab (CGTrader)",
+      "notes": "Needs printed verification",
+      "geometry": {
+        "pitchCircleDiameter": 125,
+        "threadedHoles": {
+          "anglesDeg": [30, 90, 150, 210, 270, 330],
+          "thread": "M10",
+          "threadDepth": 16
+        },
+        "locatingPin": {
+          "diameter": 10,
+          "fit": "H7",
+          "depth": 10,
+          "angleDeg": 0,
+          "anglesDeg": [0, 180]
+        },
+        "raisedSpigot": {
+          "diameter": 160,
+          "height": 10.5,
+          "wallFlats": {
+            "width": 35.553,
+            "angleDeg": 0
+          }
+        },
+        "centreHole": {
+          "diameter": 80,
+          "fit": "H7",
+          "depth": 9
+        }
+      }
+    },
+    {
+      "id": "fanuc-r2000ib-165f",
+      "brand": "Fanuc",
+      "model": "R-2000iB/165F",
+      "status": "Needs printed verification",
+      "source": "Fanuc ISO flange wrist drawing (165F, 125L, 165R, 150U, 170CF); R-2000iC 165F flange STEP file by AnyKolab (CGTrader)",
+      "notes": "Needs printed verification",
+      "geometry": {
+        "pitchCircleDiameter": 125,
+        "threadedHoles": {
+          "anglesDeg": [30, 90, 150, 210, 270, 330],
+          "thread": "M10",
+          "threadDepth": 16
+        },
+        "locatingPin": {
+          "diameter": 10,
+          "fit": "H7",
+          "depth": 10,
+          "angleDeg": 0,
+          "anglesDeg": [0, 180]
+        },
+        "raisedSpigot": {
+          "diameter": 160,
+          "height": 10.5,
+          "wallFlats": {
+            "width": 35.553,
+            "angleDeg": 0
+          }
+        },
+        "centreHole": {
+          "diameter": 80,
+          "fit": "H7",
+          "depth": 9
+        }
+      }
+    },
+    {
+      "id": "fanuc-r2000ib-165r",
+      "brand": "Fanuc",
+      "model": "R-2000iB/165R",
+      "status": "Needs printed verification",
+      "source": "Fanuc ISO flange wrist drawing (165F, 125L, 165R, 150U, 170CF); R-2000iC 165F flange STEP file by AnyKolab (CGTrader)",
+      "notes": "Needs printed verification",
+      "geometry": {
+        "pitchCircleDiameter": 125,
+        "threadedHoles": {
+          "anglesDeg": [30, 90, 150, 210, 270, 330],
+          "thread": "M10",
+          "threadDepth": 16
+        },
+        "locatingPin": {
+          "diameter": 10,
+          "fit": "H7",
+          "depth": 10,
+          "angleDeg": 0,
+          "anglesDeg": [0, 180]
+        },
+        "raisedSpigot": {
+          "diameter": 160,
+          "height": 10.5,
+          "wallFlats": {
+            "width": 35.553,
+            "angleDeg": 0
+          }
+        },
+        "centreHole": {
+          "diameter": 80,
+          "fit": "H7",
+          "depth": 9
+        }
+      }
+    },
+    {
+      "id": "fanuc-r2000ib-150u",
+      "brand": "Fanuc",
+      "model": "R-2000iB/150U",
+      "status": "Needs printed verification",
+      "source": "Fanuc ISO flange wrist drawing (165F, 125L, 165R, 150U, 170CF); R-2000iC 165F flange STEP file by AnyKolab (CGTrader)",
+      "notes": "Needs printed verification",
+      "geometry": {
+        "pitchCircleDiameter": 125,
+        "threadedHoles": {
+          "anglesDeg": [30, 90, 150, 210, 270, 330],
+          "thread": "M10",
+          "threadDepth": 16
+        },
+        "locatingPin": {
+          "diameter": 10,
+          "fit": "H7",
+          "depth": 10,
+          "angleDeg": 0,
+          "anglesDeg": [0, 180]
+        },
+        "raisedSpigot": {
+          "diameter": 160,
+          "height": 10.5,
+          "wallFlats": {
+            "width": 35.553,
+            "angleDeg": 0
+          }
+        },
+        "centreHole": {
+          "diameter": 80,
+          "fit": "H7",
+          "depth": 9
+        }
+      }
+    },
+    {
+      "id": "fanuc-r2000ib-170cf",
+      "brand": "Fanuc",
+      "model": "R-2000iB/170CF",
+      "status": "Needs printed verification",
+      "source": "Fanuc ISO flange wrist drawing (165F, 125L, 165R, 150U, 170CF); R-2000iC 165F flange STEP file by AnyKolab (CGTrader)",
+      "notes": "Needs printed verification",
+      "geometry": {
+        "pitchCircleDiameter": 125,
+        "threadedHoles": {
+          "anglesDeg": [30, 90, 150, 210, 270, 330],
+          "thread": "M10",
+          "threadDepth": 16
+        },
+        "locatingPin": {
+          "diameter": 10,
+          "fit": "H7",
+          "depth": 10,
+          "angleDeg": 0,
+          "anglesDeg": [0, 180]
+        },
+        "raisedSpigot": {
+          "diameter": 160,
+          "height": 10.5,
+          "wallFlats": {
+            "width": 35.553,
+            "angleDeg": 0
+          }
+        },
+        "centreHole": {
+          "diameter": 80,
+          "fit": "H7",
+          "depth": 9
+        }
+      }
     }
   ]
 }

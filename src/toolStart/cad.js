@@ -77,6 +77,21 @@ function addWallKeys(body, pockets, kind, wallR, tol, depth, warnings) {
   return { body, n: pockets.count };
 }
 
+// Wall flats: the flange raised spigot has a straight flat (a chord of `width`). The collar gets a matching key
+// (the circle segment beyond the flat, pulled back by the collar tolerance), so the part only fits one way round.
+function addWallFlats(body, flats, spigotR, collarR, tol, depth, warnings) {
+  const dist = Math.sqrt(spigotR * spigotR - (flats.width / 2) ** 2) + tol; // flat distance from the axis, plus clearance
+  if (!(flats.width > 0) || flats.width >= 2 * spigotR || depth <= 0 || collarR - dist <= EPS) {
+    warnings.push("The wall flat key was skipped: the flat does not reach the printed collar.");
+    return { body, n: 0 };
+  }
+  const half = collarR + 1;
+  let key = draw([dist, -half]).lineTo([half, -half]).lineTo([half, half]).lineTo([dist, half]).close().sketchOnPlane("XY", -depth).extrude(depth + KEY_OVERLAP);
+  key = keepIn(key, cyl(2 * (collarR + KEY_OVERLAP), -depth - 1, 1));
+  key = key.rotate(flats.angleDeg ?? 0, [0, 0, 0], [0, 0, 1]);
+  return { body: fuseWith(body, key), n: 1 };
+}
+
 // Revolve a closed (r, z) profile around the Z axis.
 function revolveProfile(points) {
   const pts = points.filter(
@@ -107,7 +122,7 @@ export function buildToolStart(flange, userSettings = {}) {
   const hasSpigot = s.fitMode !== "plate";
   const hasCollar = s.fitMode === "plate-spigot-collar";
   const hasCentre = !!g.centreHole, hasRaised = !!g.raisedSpigot, hasPin = !!g.locatingPin;
-  if (hasSpigot && !hasCentre) errors.push("This flange has no centre hole, so Plate + Spigot is not available.");
+  if (hasSpigot && !(hasCentre && g.centreHole.depth > 0)) errors.push("This flange has no centre hole depth, so Plate + Spigot is not available.");
   if (hasCollar && !hasRaised) errors.push("This flange has no raised spigot, so the collar is not available.");
   if (s.fitMode === "plate" && s.dowelMode === "printedPin" && hasPin)
     errors.push("A printed dowel is not allowed in Plate mode: Plate prints flat from its base without supports.");
@@ -229,6 +244,11 @@ export function buildToolStart(flange, userSettings = {}) {
       body = r.body;
       keyCount += r.n;
     }
+    if (hasCollar && g.raisedSpigot?.wallFlats) {
+      const r = addWallFlats(body, g.raisedSpigot.wallFlats, g.raisedSpigot.diameter / 2, rci, tol.collar, depth, warnings);
+      body = r.body;
+      keyCount += r.n;
+    }
   }
 
   // Cutters for chamfered hole edges
@@ -268,12 +288,15 @@ export function buildToolStart(flange, userSettings = {}) {
   // Dowel (present in every fit mode)
   let pinLength = null;
   const dowelD = hasPin ? g.locatingPin.diameter + 2 * tol.dowelHole : 0;
+  const pinSpots = (g.locatingPin?.anglesDeg ?? [0]).map((deg) => [pcdR * Math.cos((deg * Math.PI) / 180), pcdR * Math.sin((deg * Math.PI) / 180)]); // one dowel at 0° unless anglesDeg lists more
   if (!hasPin) {
     pinLength = 0;
   } else if (s.dowelMode === "hole") {
-    body = cutBy(body, cyl(dowelD, -1, t + 1, pcdR, 0));
-    if (chAway) { body = cutBy(body, coneAway(dowelD / 2, t, pcdR, 0)); chamferCuts.push(dowelD / 2); }
-    if (chRobot) { body = cutBy(body, coneRobot(dowelD / 2, pcdR, 0)); chamferCuts.push(dowelD / 2); }
+    for (const [x, y] of pinSpots) {
+      body = cutBy(body, cyl(dowelD, -1, t + 1, x, y));
+      if (chAway) { body = cutBy(body, coneAway(dowelD / 2, t, x, y)); chamferCuts.push(dowelD / 2); }
+      if (chRobot) { body = cutBy(body, coneRobot(dowelD / 2, x, y)); chamferCuts.push(dowelD / 2); }
+    }
   } else {
     const pinDepth = hasSpigot ? depth : baseDepth;
     pinLength = Math.min(pinDepth - tol.dowelPin, g.locatingPin.depth - tol.dowelPin);
@@ -281,7 +304,7 @@ export function buildToolStart(flange, userSettings = {}) {
     const pinPts = chRobot
       ? [[0, -pinLength], [pr - c, -pinLength], [pr, -pinLength + c], [pr, t / 2], [0, t / 2]]
       : [[0, -pinLength], [pr, -pinLength], [pr, t / 2], [0, t / 2]];
-    body = fuseWith(body, revolveProfile(pinPts).translate([pcdR, 0, 0]));
+    for (const [x, y] of pinSpots) body = fuseWith(body, revolveProfile(pinPts).translate([x, y, 0]));
     warnings.push("Printed pin is not recommended: weaker and less accurate than a metal dowel.");
   }
 
