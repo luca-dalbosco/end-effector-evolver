@@ -119,6 +119,38 @@
           "depth": 6.2
         }
       }
+    },
+    {
+      "id": "kuka-kr6-2",
+      "brand": "KUKA",
+      "model": "KR 6 /2",
+      "status": "Needs printed verification",
+      "source": "KUKA KR 6 /2 DIN/ISO mounting flange drawing (ZH 6 kg); hole layout from the STEP file; courtesy of Laboratorio de Mecatronica y Robotica (LEMUR), Departamento de Mecanica, Universidad de Chile",
+      "geometry": {
+        "pitchCircleDiameter": 40,
+        "threadedHoles": {
+          "anglesDeg": [45, 135, 180, 225, 315],
+          "thread": "M6",
+          "threadDepth": 6,
+          "drillDepth": 7
+        },
+        "locatingPin": {
+          "diameter": 6,
+          "fit": "H7",
+          "depth": 6,
+          "angleDeg": 0
+        },
+        "raisedSpigot": {
+          "diameter": 50,
+          "fit": "h7",
+          "height": 6.5
+        },
+        "centreHole": {
+          "diameter": 25,
+          "fit": "H7",
+          "depth": 6.2
+        }
+      }
     }
   ]
 }
