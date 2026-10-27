@@ -178,6 +178,31 @@
       }
     },
     {
+      "id": "dobot-nova-2",
+      "brand": "Dobot",
+      "model": "Nova 2",
+      "status": "Needs printed verification",
+      "source": "DOBOT Nova series hardware user guide, 4.1.3 Nova 2 end flange dimensions (ISO 9409-1-50-4-M6)",
+      "notes": "Plate only for now: spigot height and centre hole depth are not in the guide",
+      "geometry": {
+        "pitchCircleDiameter": 50,
+        "outerDiameter": 63,
+        "threadedHoles": {
+          "count": 4,
+          "thread": "M6",
+          "threadDepth": 6,
+          "startAngleDeg": 45,
+          "spacingDeg": 90
+        },
+        "locatingPin": {
+          "diameter": 6,
+          "fit": "H7",
+          "depth": 6,
+          "angleDeg": 0
+        }
+      }
+    },
+    {
       "id": "fanuc-r2000ib-125l",
       "brand": "Fanuc",
       "model": "R-2000iB/125L",
