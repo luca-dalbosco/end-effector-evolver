@@ -162,6 +162,10 @@
       "geometry": {
         "pitchCircleDiameter": 50,
         "outerDiameter": 63,
+        "centreHole": {
+          "diameter": 31.5,
+          "fit": "H7"
+        },
         "threadedHoles": {
           "count": 4,
           "thread": "M6",
@@ -187,6 +191,10 @@
       "geometry": {
         "pitchCircleDiameter": 50,
         "outerDiameter": 63,
+        "centreHole": {
+          "diameter": 31.5,
+          "fit": "H7"
+        },
         "threadedHoles": {
           "count": 4,
           "thread": "M6",

@@ -65,8 +65,9 @@ export function initToolStart({ geo, $, startGroup, list }) {
   select("Brand", brands, () => cur.flange.brand, (v) => { if (v === ADD.id) return openForm(); cur.flange = flanges.find((f) => f.brand === v && ready(f)) ?? flanges.find((f) => f.brand === v); fixSettings(); }, undefined, (b) => b.id === ADD.id || flanges.some((f) => f.brand === b && ready(f)));
   select("Robot model", () => [...models().map((f) => ({ id: f.id, label: f.model + (ready(f) ? "" : " (data needed)") })), ADD], () => cur.flange.id,
     (v) => { if (v === ADD.id) return openForm(); cur.flange = flanges.find((f) => f.id === v); fixSettings(); }, undefined, (o) => o.id === ADD.id || ready(flanges.find((f) => f.id === o.id)));
-  function fixSettings() { if (settings.fitMode === "plate-spigot" && !g()?.centreHole) settings.fitMode = "plate"; if (settings.fitMode === "plate-spigot-collar" && !(g()?.centreHole && g()?.raisedSpigot)) settings.fitMode = "plate"; if (settings.fitMode === "plate") settings.dowelMode = "hole"; }
-  const fitOk = (o) => o.id === "plate" || (!!g()?.centreHole && (o.id === "plate-spigot" || !!g()?.raisedSpigot));
+  const hasSocket = () => g()?.centreHole?.depth > 0; // a centre hole without a known depth only cuts the Plate hole
+  function fixSettings() { if (settings.fitMode === "plate-spigot" && !hasSocket()) settings.fitMode = "plate"; if (settings.fitMode === "plate-spigot-collar" && !(hasSocket() && g()?.raisedSpigot)) settings.fitMode = "plate"; if (settings.fitMode === "plate") settings.dowelMode = "hole"; }
+  const fitOk = (o) => o.id === "plate" || (hasSocket() && (o.id === "plate-spigot" || !!g()?.raisedSpigot));
   sec("Fit");
   select("Fit mode", () => ts.fitMode.options, () => settings.fitMode, (v) => { settings.fitMode = v; fixSettings(); }, undefined, fitOk, "fitMode");
   select("Spigot", () => ts.spigotStyle.options, () => settings.spigotStyle, (v) => (settings.spigotStyle = v), undefined, undefined, "spigot"); // in Plate mode: Full = closed plate

@@ -122,7 +122,7 @@ export function buildToolStart(flange, userSettings = {}) {
   const hasSpigot = s.fitMode !== "plate";
   const hasCollar = s.fitMode === "plate-spigot-collar";
   const hasCentre = !!g.centreHole, hasRaised = !!g.raisedSpigot, hasPin = !!g.locatingPin;
-  if (hasSpigot && !hasCentre) errors.push("This flange has no centre hole, so Plate + Spigot is not available.");
+  if (hasSpigot && !(hasCentre && g.centreHole.depth > 0)) errors.push("This flange has no centre hole depth, so Plate + Spigot is not available.");
   if (hasCollar && !hasRaised) errors.push("This flange has no raised spigot, so the collar is not available.");
   if (s.fitMode === "plate" && s.dowelMode === "printedPin" && hasPin)
     errors.push("A printed dowel is not allowed in Plate mode: Plate prints flat from its base without supports.");
