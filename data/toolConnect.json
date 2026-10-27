@@ -37,6 +37,7 @@
   "volumeFraction": { "min": 0.05, "max": 0.6, "step": 0.01, "default": 0.25, "recommendedRange": [0.15, 0.4], "note": "Material amount: share of the design space that may be filled. Left = light, right = strong. The weight next to it is an estimate for the first pass." },
   "printReady": { "default": false, "smoothMaxPower": 40, "smoothMinEps": 0.0001, "startDensity": 0.5, "note": "Print-ready (test): printed with the flange face on the bed. Nothing grows below the bed, and every voxel must rest on voxels below it (45° overhang at most), so there are no supports and no floating islands. Method: additive manufacturing filter (Langelaar 2017)." },
   "material": { "label": "PLA", "densityGcm3": 1.24, "youngsModulusMPa": 2300, "note": "Used only for the weight and sag readout (solid, 100% infill). Printed parts are weaker across layers." },
+  "maxSagMm": { "min": 1, "max": 1000, "step": 1, "default": 50, "recommendedRange": [10, 100], "note": "A sag above this (or a solver result that is not a valid number) is treated as a failed solve: the panel shows a warning instead of the number." },
   "cantileverRatio": { "min": 0.7, "max": 1.05, "note": "Self-test: the solver's cantilever tip drop divided by beam theory must fall in this range." },
   "arrowLengthMm": 60,
   "filterRadius": { "min": 1.2, "max": 4, "step": 0.1, "default": 2, "recommendedRange": [1.5, 3], "note": "In voxels. Bigger = thicker, smoother members." },

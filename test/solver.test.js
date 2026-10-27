@@ -70,6 +70,13 @@ test("optimizer: pieces joined only at an edge, or not at all, are left out (fre
   assert.ok(Number.isFinite(a.c) && a.c > 0, `compliance ${a.c}`);
   assert.ok(Math.abs(a.c - b.c) < 1e-9 * b.c, `with loose pieces ${a.c}, beam only ${b.c}`);
 });
+test("solve check: NaN, negative or absurd results give a warning, normal ones do not", async () => {
+  const { solveCheck } = await import("../src/geom/solveCheck.js"), max = tc.maxSagMm.default;
+  assert.equal(solveCheck({ c: 13.4, c0: 13.4, sag: 0.04 }, max), null);
+  assert.equal(solveCheck({ c: 8.8, c0: 13.4 }, max), null); // progress steps have no sag
+  for (const m of [{ c: NaN, c0: NaN }, { c: -1.8e11, c0: -1.8e11, sag: -3.6e9 }, { c: 15, c0: 93, sag: 24305379 }, { c: 15, c0: 93, sag: NaN }, { c: Infinity, c0: 1 }])
+    assert.ok(solveCheck(m, max), JSON.stringify(m));
+});
 test("refine rule: material cap and stiffness tolerance", async () => {
   const r = tc.refine;
   check(await refineSelfTest(r.stiffnessTolerance.default, r.shrinkStep.default, r.minVolumeFraction.default, tc.solver));
