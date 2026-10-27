@@ -55,6 +55,28 @@ test("multigrid: coarse stiffness = Pᵀ K P, and the preconditioner is symmetri
   assert.ok(Math.abs(dot(r2, z1) - dot(r1, z2)) < 1e-9 * Math.abs(dot(r1, z1)), "symmetric");
   assert.ok(dot(r1, z1) > 0, "positive");
 });
+test("optimizer: pieces joined only at an edge, or not at all, are left out (free hinge, no NaN)", async () => {
+  // a beam held at x = 0, plus a cube that touches the beam only at an edge and a two-cube piece that touches nothing
+  const nx = 12, ny = 6, nz = 6, nel = nx * ny * nz, at = (i, j, k) => i + nx * (j + ny * k), sx = nx + 1, sy = ny + 1;
+  const beam = new Uint8Array(nel); for (let k = 0; k < 2; k++) for (let j = 0; j < 2; j++) for (let i = 0; i < nx; i++) beam[at(i, j, k)] = 1;
+  const active = beam.slice(); active[at(5, 2, 2)] = 1; active[at(9, 3, 2)] = 1; active[at(10, 3, 2)] = 1;
+  const fixedMask = new Uint8Array(3 * sx * sy * (nz + 1)), force = new Float64Array(fixedMask.length);
+  for (let k = 0; k <= nz; k++) for (let j = 0; j <= ny; j++) for (let d = 0; d < 3; d++) fixedMask[3 * (sx * (j + sy * k)) + d] = 1;
+  for (let k = 0; k <= 2; k++) for (let j = 0; j <= 2; j++) force[3 * (nx + sx * (j + sy * k)) + 2] = -1 / 9;
+  const { faceJoined, optimize } = await import("../src/geom/optimizer.js");
+  assert.deepEqual(faceJoined(nx, ny, nz, active, fixedMask), beam);
+  const solver = { ...tc.solver, multigrid: { ...tc.solver.multigrid, directMaxDofs: 50 } }, run = (a) => optimize({ nx, ny, nz, active: a, passive: new Uint8Array(nel), fixedMask, force, vf: 0.5, rmin: 1.5, maxIter: 3, solver }, () => {}, () => false);
+  const a = await run(active), b = await run(beam);
+  assert.ok(Number.isFinite(a.c) && a.c > 0, `compliance ${a.c}`);
+  assert.ok(Math.abs(a.c - b.c) < 1e-9 * b.c, `with loose pieces ${a.c}, beam only ${b.c}`);
+});
+test("solve check: NaN, negative or absurd results give a warning, normal ones do not", async () => {
+  const { solveCheck } = await import("../src/geom/solveCheck.js"), max = tc.maxSagMm.default;
+  assert.equal(solveCheck({ c: 13.4, c0: 13.4, sag: 0.04 }, max), null);
+  assert.equal(solveCheck({ c: 8.8, c0: 13.4 }, max), null); // progress steps have no sag
+  for (const m of [{ c: NaN, c0: NaN }, { c: -1.8e11, c0: -1.8e11, sag: -3.6e9 }, { c: 15, c0: 93, sag: 24305379 }, { c: 15, c0: 93, sag: NaN }, { c: Infinity, c0: 1 }])
+    assert.ok(solveCheck(m, max), JSON.stringify(m));
+});
 test("refine rule: material cap and stiffness tolerance", async () => {
   const r = tc.refine;
   check(await refineSelfTest(r.stiffnessTolerance.default, r.shrinkStep.default, r.minVolumeFraction.default, tc.solver));
