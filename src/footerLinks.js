@@ -34,7 +34,7 @@ const LIBS = [
 
 // Welcome pop-up (first visit, and the footer "Tutorial" link). Edit the texts here.
 const WELCOME = {
-  video: '', // <- put the intro video URL here (empty = shows "coming soon")
+  video: './demo.mp4', // intro video, file in public/ (empty = shows "coming soon")
   intro: `<p><strong>End Effector Evolver</strong> (EEEvolver)<br>
     <small>Designed by Luca Dalbosco · co-coded with Claude</small></p>
     <p>This tool builds a 3D-printable connector between your robot's flange and the part it will carry, such as a gripper or an actuator.
@@ -228,7 +228,7 @@ export function initFooterLinks() {
     const first = page === 0, last = page === N;
     const st = TUTORIAL_STEPS[page - 1];
     const body = first
-      ? `<h2>Welcome</h2>${WELCOME.intro}<p>${WELCOME.video ? `<a href="${WELCOME.video}" target="_blank" rel="noopener">▶ Watch the intro video</a>` : '▶ Intro video: coming soon.'}</p>${WELCOME.disclaimer}`
+      ? `<h2>Welcome</h2>${WELCOME.intro}${WELCOME.video ? `<video src="${WELCOME.video}" controls preload="metadata" style="width:100%;border-radius:6px"></video>` : '<p>▶ Intro video: coming soon.</p>'}${WELCOME.disclaimer}`
       : `<h2>${page} · ${st.title}</h2>${st.html}${st.strip}<p>${st.text}</p>`;
     const dots = TUTORIAL_STEPS.map((x, i) => `<a class="tv-pill${i + 1 === page ? ' on' : ''}" data-p="${i + 1}">${i + 1} ${x.pill}</a>`).join('');
     dialog.innerHTML = `${body}<div class="tv-pills">${dots}</div><div class="wel-foot"><label><input type="checkbox" id="wel-hide"> Don't show again</label>${first ? '<button id="wel-skip">Skip</button>' : '<button id="wel-back">Back</button>'}<button id="wel-next">${last ? 'Done' : 'Next →'}</button></div>`;
